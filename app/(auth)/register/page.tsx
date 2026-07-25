@@ -1,0 +1,179 @@
+'use client';
+
+import { FormEvent, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+
+function normalizeSlug(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+}
+
+export default function RegisterPage() {
+  const router = useRouter();
+  const [clinicName, setClinicName] = useState('');
+  const [clinicSlug, setClinicSlug] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [message, setMessage] = useState('');
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError('');
+    setMessage('');
+    setIsSubmitting(true);
+
+    const slug = normalizeSlug(clinicSlug || clinicName);
+    if (!slug) {
+      setError('يرجى إدخال اسم عيادة صالح لإنشاء عنوان URL.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (!isSupabaseConfigured) {
+      setError('ميزة التسجيل غير متاحة في وضع العرض التجريبي المحلي.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    const { data, error: signUpError } = await supabase.auth.signUp({
+      email,
+      password,
+    });
+
+    if (signUpError) {
+      setError(signUpError.message);
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (!data?.user?.id) {
+      setError('لم يتم إنشاء حساب المستخدم. يرجى المحاولة مرة أخرى.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    const token = data?.session?.access_token;
+    if (!token) {
+      setError('تعذر الحصول على جلسة المستخدم بعد التسجيل. يرجى تسجيل الدخول.');
+      setIsSubmitting(false);
+      return;
+    }
+
+    const response = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        clinic_name: clinicName,
+        clinic_slug: slug,
+      }),
+    });
+
+    const result = await response.json();
+    setIsSubmitting(false);
+
+    if (!response.ok) {
+      setError(result.error || 'حدث خطأ أثناء إنشاء العيادة.');
+      return;
+    }
+
+    setMessage('تم إنشاء العيادة والمستخدم بنجاح. سيتم تحويلك إلى لوحة التحكم...');
+    router.replace('/dashboard');
+  }
+
+  return (
+    <main className="min-h-screen bg-slate-950 px-4 py-12 text-slate-100 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-md rounded-[2rem] border border-slate-800 bg-slate-900/90 p-8 shadow-xl shadow-slate-950/30">
+        <h1 className="text-3xl font-semibold text-white">إنشاء حساب عيادة جديدة</h1>
+        <p className="mt-3 text-slate-400">سجل كمالك العيادة لبدء استخدام لوحة تحكم Dental AI Receptionist.</p>
+
+        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+          <div>
+            <label htmlFor="clinicName" className="block text-sm font-medium text-slate-200">
+              اسم العيادة
+            </label>
+            <input
+              id="clinicName"
+              value={clinicName}
+              onChange={(event) => setClinicName(event.target.value)}
+              className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
+              placeholder="عيادة الأسنان المتميزة"
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="clinicSlug" className="block text-sm font-medium text-slate-200">
+              عنوان URL قصير للعيادة (اختياري)
+            </label>
+            <input
+              id="clinicSlug"
+              value={clinicSlug}
+              onChange={(event) => setClinicSlug(event.target.value)}
+              className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
+              placeholder="clinic-name"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-slate-200">
+              البريد الإلكتروني
+            </label>
+            <input
+              id="email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
+              placeholder="clinic@example.com"
+              required
+            />
+          </div>
+
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium text-slate-200">
+              كلمة المرور
+            </label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
+              placeholder="••••••••"
+              required
+            />
+          </div>
+
+          {error ? <p className="text-sm text-red-400">{error}</p> : null}
+          {message ? <p className="text-sm text-emerald-400">{message}</p> : null}
+
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="w-full rounded-3xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isSubmitting ? 'جارٍ الإنشاء...' : 'إنشاء حساب العيادة'}
+          </button>
+        </form>
+
+        <div className="mt-6 text-center text-sm text-slate-500">
+          <p>لديك حساب بالفعل؟</p>
+          <Link href="/login" className="text-cyan-300 hover:text-cyan-200">
+            تسجيل دخول
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
+}

@@ -1,0 +1,3 @@
+Cleaning: Full dental cleaning service for adults - price: 50 - duration: 30
+Root Canal: Root canal therapy - price: 300 - duration: 90
+Whitening: Teeth whitening session - price: 120 - duration: 60
