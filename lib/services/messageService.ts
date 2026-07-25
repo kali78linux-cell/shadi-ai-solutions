@@ -28,16 +28,14 @@ export async function receivePatientMessage(params: {
   userId?: string | null;
   text: string;
 }) {
-  // Persist incoming message and orchestrate AI response
-  const msg = await saveMessage({ conversation_id: params.conversationId || null, clinic_id: params.clinicId, role: 'patient', sender_id: params.userId || null, content: params.text });
-
-  const assistant = await handleIncomingMessage({
+  // The orchestrator handles persisting the user message and generating the AI response.
+  const messages = await handleIncomingMessage({
     clinicId: params.clinicId,
     conversationId: params.conversationId || null,
     sessionId: params.sessionId || null,
     userId: params.userId || null,
     text: params.text,
   });
-
-  return { userMessage: msg, assistantMessage: assistant };
+  
+  return messages || { userMessage: null, assistantMessage: null };
 }

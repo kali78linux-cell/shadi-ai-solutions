@@ -45,6 +45,11 @@ const mockNotificationService = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/services/notificationService', () => mockNotificationService);
 
+const mockCostService = vi.hoisted(() => ({
+  calculateCost: vi.fn(),
+}));
+vi.mock('@/lib/services/aiCostService', () => mockCostService);
+
 const mockIntelligence = vi.hoisted(() => ({
   analyzeAndPersistMessage: vi.fn(),
 }));
@@ -89,6 +94,7 @@ describe('AI Orchestrator RAG Pipeline', () => {
     mockContextRetrieval.retrieveContext.mockResolvedValue(retrievedContext);
     mockPromptManager.buildPrompt.mockReturnValue(finalPrompt);
     mockAiProvider.generate.mockResolvedValue(aiResponse);
+    mockCostService.calculateCost.mockReturnValue(0.0002);
     mockSupabase.supabase.from('ai_usage').insert.mockResolvedValue({ error: null });
     mockSupabase.supabase.from('ai_events').insert.mockResolvedValue({ error: null });
 
@@ -116,9 +122,18 @@ describe('AI Orchestrator RAG Pipeline', () => {
     // 4. Verify the final AI message was persisted
     expect(mockSupabase.supabase.from('messages').insert).toHaveBeenCalledWith(
       expect.arrayContaining([
+        expect.objectContaining({ role: 'patient', content: userQuery }),
+      ])
+    );
+    expect(mockSupabase.supabase.from('messages').insert).toHaveBeenCalledWith(
+      expect.arrayContaining([
         expect.objectContaining({ role: 'assistant', content: aiResponse.text })
       ])
     );
+
+    // 5. Verify usage was tracked with cost
+    expect(mockCostService.calculateCost).toHaveBeenCalledWith(aiResponse.model, aiResponse.tokens);
+    expect(mockSupabase.supabase.from('ai_usage').insert).toHaveBeenCalledWith([expect.objectContaining({ estimated_cost: 0.0002 })]);
   });
 
   it('should handle cases where no context is found', async () => {

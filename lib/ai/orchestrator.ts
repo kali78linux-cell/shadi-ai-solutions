@@ -8,6 +8,7 @@ import { analyzeAndPersistMessage } from '@/lib/services/conversationIntelligenc
 import { getConversationHistory } from '@/lib/services/messageService';
 import { updateConversationState } from '@/lib/services/conversationService';
 import { notifyStaffForHandoff } from '@/lib/services/notificationService';
+import { calculateCost } from '@/lib/services/aiCostService';
 import { sanitizeForPrompt } from './security';
 
 // Register example providers
@@ -32,7 +33,7 @@ export async function handleIncomingMessage(opts: {
 
   try {
     // Persist incoming message
-    const { data: userMsg } = await supabase.from('messages').insert([
+    const { data: userMsg, error: userMsgError } = await supabase.from('messages').insert([
       {
         conversation_id: conversationId,
         clinic_id: clinicId,
@@ -41,6 +42,7 @@ export async function handleIncomingMessage(opts: {
         content: text,
       },
     ]).select('*').single();
+    if (userMsgError) throw userMsgError;
 
     // Retrieve clinic settings and context
     const { data: settingsData } = await supabase.from('clinic_ai_settings').select('*').eq('clinic_id', clinicId).limit(1).single();
@@ -75,7 +77,7 @@ export async function handleIncomingMessage(opts: {
     const took = Date.now() - start;
 
     // Persist assistant message
-    const { data: assistantMsg } = await supabase.from('messages').insert([
+    const { data: assistantMsg, error: assistantMsgError } = await supabase.from('messages').insert([
       {
         conversation_id: conversationId,
         clinic_id: clinicId,
@@ -87,15 +89,17 @@ export async function handleIncomingMessage(opts: {
         metadata: { provider: provider.id, raw: result.raw, intelligence },
       },
     ]).select('*').single();
+    if (assistantMsgError) throw assistantMsgError;
 
     // Track usage
     if (result.tokens && result.tokens > 0) {
+      const estimatedCost = calculateCost(result.model, result.tokens);
       await supabase.from('ai_usage').insert([
         {
           clinic_id: clinicId,
           model: result.model || null,
           tokens_consumed: result.tokens,
-          estimated_cost: null,
+          estimated_cost: estimatedCost,
         },
       ]);
     }
@@ -106,7 +110,7 @@ export async function handleIncomingMessage(opts: {
 
     logEvent('ai_request_completed', { clinic_id: clinicId, conversation_id: conversationId, session_id: sessionId, user_id: userId, provider: provider.id, took_ms: took, tokens: result.tokens });
 
-    return assistantMsg;
+    return { userMessage: userMsg, assistantMessage: assistantMsg };
   } catch (error) {
     logEvent('ai_request_failed', {
       clinic_id: clinicId,

@@ -10,6 +10,11 @@ async function getActiveClinicId(userId: string, supabase: any): Promise<string 
 }
 
 export async function POST(request: Request) {
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    console.error('Supabase URL or Anon Key is not set in environment variables.');
+    return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
+  }
+
   const cookieStore = cookies();
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
