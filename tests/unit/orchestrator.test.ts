@@ -180,6 +180,7 @@ describe('AI Orchestrator RAG Pipeline', () => {
       shouldHandoff: true,
     } as any);
     mockConversationService.updateConversationState.mockResolvedValue({} as any);
+    mockConversationService.getConversationById.mockResolvedValue({ id: 'conv-1', clinic_id: 'clinic-1', patient_id: 'patient-1' });
 
     const result = await handleIncomingMessage({
       clinicId: 'clinic-1',
