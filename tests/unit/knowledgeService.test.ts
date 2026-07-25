@@ -96,7 +96,7 @@ describe('KnowledgeService', () => {
       .toThrow('Failed to upload file to storage: Storage access denied');
   });
 
-  it('should leave an orphaned file in storage if database insert fails', async () => {
+  it('should clean up storage if database insert fails', async () => {
     const file = new File(['test content'], 'test.txt', { type: 'text/plain' });
     const clinicId = 'test-clinic-id';
     const userId = 'test-user-id';
@@ -113,7 +113,8 @@ describe('KnowledgeService', () => {
     await expect(knowledgeService.handleUpload({ file, clinicId, userId }))
       .rejects.toThrow('Failed to create document record: DB insert failed');
 
-    expect(mockSupabase.storage.from('knowledge_documents').remove).not.toHaveBeenCalled();
+    expect(mockSupabase.storage.from).toHaveBeenCalledWith('knowledge_documents');
+    expect(mockSupabase.storage.remove).toHaveBeenCalledWith([`${clinicId}/mock-uuid.txt`]);
   });
 
   it('should process a document by parsing, chunking, and embedding', async () => {

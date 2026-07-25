@@ -27,27 +27,34 @@ export class KnowledgeService {
       throw new Error(`Failed to upload file to storage: ${uploadError.message}`);
     }
 
-    // 2. Create document record in the database
-    const { data: docData, error: docError } = await this.supabase
-      .from('clinic_knowledge_documents')
-      .insert({
-        clinic_id: clinicId,
-        uploaded_by: userId,
-        original_filename: file.name,
-        file_type: file.type,
-        mime_type: file.type,
-        file_size: file.size,
-        storage_path: storagePath,
-        upload_status: 'success',
-        processing_status: 'pending',
-      })
-      .select()
-      .single();
+    let docData;
+    try {
+      // 2. Create document record in the database
+      const { data, error: docError } = await this.supabase
+        .from('clinic_knowledge_documents')
+        .insert({
+          clinic_id: clinicId,
+          uploaded_by: userId,
+          original_filename: file.name,
+          file_type: file.type,
+          mime_type: file.type,
+          file_size: file.size,
+          storage_path: storagePath,
+          upload_status: 'success',
+          processing_status: 'pending',
+        })
+        .select()
+        .single();
 
-    if (docError) {
-      console.error('Database insert error:', docError);
-      // TODO: Clean up storage if DB insert fails
-      throw new Error(`Failed to create document record: ${docError.message}`);
+      if (docError) {
+        throw docError;
+      }
+      docData = data;
+    } catch (dbError: any) {
+      console.error('Database insert error, rolling back storage upload:', dbError);
+      // Rollback: remove the file from storage if DB insert fails.
+      await this.supabase.storage.from('knowledge_documents').remove([storagePath]);
+      throw new Error(`Failed to create document record: ${dbError.message}`);
     }
 
     // Asynchronously process the document. In a real app, this would be a background job.

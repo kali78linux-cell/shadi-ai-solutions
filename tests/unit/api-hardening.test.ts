@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const mockRateLimiter = { isAllowed: vi.fn() };
 const { authGetUser, fromMock, createConversationMock, receivePatientMessageMock, getConversationByIdMock, listConversationsForClinicMock, updateConversationStatusMock } = vi.hoisted(() => ({
   authGetUser: vi.fn(),
   fromMock: vi.fn(),
@@ -15,6 +16,10 @@ vi.mock('@/lib/supabase', () => ({
     auth: { getUser: authGetUser },
     from: fromMock,
   },
+}));
+
+vi.mock('@/lib/services/gateway/security/rate-limiter', () => ({
+  RateLimiter: vi.fn(() => mockRateLimiter),
 }));
 
 vi.mock('@/lib/services/conversationService', () => ({
@@ -34,6 +39,7 @@ import { POST as postMessages } from '@/app/api/ai/messages/route';
 describe('api hardening regressions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRateLimiter.isAllowed.mockReturnValue(true); // Default to allowed
     authGetUser.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null });
     getConversationByIdMock.mockResolvedValue({ id: 'conv-1', clinic_id: 'clinic-1', status: 'open' });
     listConversationsForClinicMock.mockResolvedValue([]);
@@ -109,5 +115,25 @@ describe('api hardening regressions', () => {
 
     expect(response.status).toBe(400);
     expect(payload.error).toBeDefined();
+  });
+
+  it('rejects messages when rate limit is exceeded', async () => {
+    authGetUser.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null });
+    fromMock.mockImplementation((table: string) => ({
+      select: () => ({ eq: () => ({ eq: () => ({ limit: () => ({ single: async () => ({ data: { role: 'owner' }, error: null }) }) }) }) }),
+    }));
+    mockRateLimiter.isAllowed.mockReturnValue(false); // Simulate rate limit exceeded
+
+    const response = await postMessages(new Request('https://example.com/api/ai/messages', {
+      method: 'POST',
+      body: JSON.stringify({ clinic_id: '11111111-1111-1111-1111-111111111111', text: 'hello', conversation_id: 'conv-1' }),
+      headers: { 'content-type': 'application/json', authorization: 'Bearer token' },
+    }));
+
+    const payload = await response.json();
+
+    expect(mockRateLimiter.isAllowed).toHaveBeenCalledWith('user-1');
+    expect(response.status).toBe(429);
+    expect(payload.error).toBe('Too many requests');
   });
 });
