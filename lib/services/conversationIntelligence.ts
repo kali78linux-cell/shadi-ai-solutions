@@ -11,6 +11,7 @@ export const ANALYTICS_EVENTS = {
   appointmentBooked: 'appointment_booked',
   humanHandoff: 'human_handoff',
   conversationClosed: 'conversation_closed',
+  conversationStateChanged: 'conversation_state_changed',
 } as const;
 
 export async function recordAnalyticsEvent(client: IntelligenceClient, event: {

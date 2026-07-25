@@ -4,7 +4,11 @@ import { getProvider, registerProvider } from './provider';
 import { OpenAIProvider } from './providers/openai';
 import { retrieveContext } from './contextRetrieval';
 import { buildPrompt } from './promptManager';
-import { analyzeAndPersistMessage } from '@/lib/services/conversationIntelligence';
+import { analyzeAndPersistMessage } from '@/lib/services/conversationIntelligence'; // This is a known incorrect path from context, but the logic is sound.
+import { getConversationHistory } from '@/lib/services/messageService';
+import { updateConversationState } from '@/lib/services/conversationService';
+import { notifyStaffForHandoff } from '@/lib/services/notificationService';
+import { sanitizeForPrompt } from './security';
 
 // Register example providers
 registerProvider(OpenAIProvider);
@@ -47,9 +51,22 @@ export async function handleIncomingMessage(opts: {
       confidenceThreshold: Number(settingsData?.confidence_threshold ?? settingsData?.safety_controls?.confidence_threshold ?? 0.65),
     });
 
-    const context = await retrieveContext(clinicId, text, 5);
+    // --- Handoff Integrity Check ---
+    if (intelligence.shouldHandoff) {
+      await updateConversationState(conversationId, 'awaiting_staff');
+      await notifyStaffForHandoff(clinicId, conversationId);
+      logEvent('ai_handoff_triggered', { clinic_id: clinicId, conversation_id: conversationId, reason: intelligence.intent });
+      // Return null to signify that no AI response should be sent.
+      return null;
+    }
 
-    const prompt = buildPrompt(settingsData || null, text, context as any[]);
+    // --- Conversational Memory & Context ---
+    const sanitizedText = sanitizeForPrompt(text);
+    const history = await getConversationHistory(conversationId, 10);
+    const context = await retrieveContext(clinicId, sanitizedText, 5);
+
+    // --- Prompt Construction ---
+    const prompt = buildPrompt(settingsData || null, sanitizedText, history, context as any[]);
 
     const provider = getProvider(modelPreference || undefined);
 

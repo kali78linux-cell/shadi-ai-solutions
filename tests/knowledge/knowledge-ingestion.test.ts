@@ -19,7 +19,8 @@ describe('Knowledge Ingestion Suite', () => {
   // Helper to adapt the new class-based service to the old functional test style.
   // This allows us to await the full processing pipeline for verification.
   const ingestDocument = async (clinicId: string, userId: string, buffer: Buffer, filename: string) => {
-    const file = new File([buffer], filename);
+    // Explicitly create a new Uint8Array to avoid type conflicts between Node.js Buffer and DOM File API.
+    const file = new File([new Uint8Array(buffer)], filename);
 
     // Spy on `processDocument` to prevent the fire-and-forget call inside `handleUpload`.
     const processDocumentSpy = vi.spyOn(knowledgeService, 'processDocument').mockResolvedValue(undefined);

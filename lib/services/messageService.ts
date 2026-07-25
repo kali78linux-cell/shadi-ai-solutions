@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import { Message } from '@/types/db';
 import { handleIncomingMessage } from '@/lib/ai/orchestrator';
 
 export async function saveMessage(payload: {
@@ -12,6 +13,12 @@ export async function saveMessage(payload: {
   const { data, error } = await supabase.from('messages').insert([payload]).select('*').single();
   if (error) throw error;
   return data;
+}
+
+export async function getConversationHistory(conversationId: string, limit = 10): Promise<Pick<Message, 'role' | 'content'>[]> {
+  const { data, error } = await supabase.from('messages').select('role, content').eq('conversation_id', conversationId).order('created_at', { ascending: false }).limit(limit);
+  if (error) throw error;
+  return (data as Pick<Message, 'role' | 'content'>[]).reverse(); // Reverse to get chronological order
 }
 
 export async function receivePatientMessage(params: {

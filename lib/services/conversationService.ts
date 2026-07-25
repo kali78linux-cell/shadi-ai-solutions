@@ -33,3 +33,10 @@ export async function updateConversationStatus(id: string, status: 'open' | 'awa
   if (error) throw error;
   return data as Conversation;
 }
+
+export async function updateConversationState(id: string, state: Conversation['conversation_state']) {
+  const { data, error } = await supabase.from('conversations').update({ conversation_state: state }).eq('id', id).select('*').single();
+  if (error) throw error;
+  await recordAnalyticsEvent(supabase, { clinicId: data.clinic_id, conversationId: data.id, type: ANALYTICS_EVENTS.conversationStateChanged, payload: { state } });
+  return data as Conversation;
+}
