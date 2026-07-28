@@ -61,7 +61,7 @@ const mockLogging = vi.hoisted(() => ({
 vi.mock('@/lib/server/logging', () => mockLogging);
 
 const mockSecurity = vi.hoisted(() => ({
-  sanitizeForPrompt: vi.fn((text) => text), // Pass-through by default
+  moderateUserPrompt: vi.fn(),
 }));
 vi.mock('@/lib/ai/security', () => mockSecurity);
 
@@ -87,7 +87,7 @@ describe('AI Orchestrator RAG Pipeline', () => {
     const userQuery = 'How much for a root canal?';
     const retrievedContext = [{ id: 'chunk-1', content: 'A root canal costs $1200.', similarity: 0.9 }];
     const finalPrompt = 'RAG PROMPT: A root canal costs $1200. How much for a root canal?';
-    const aiResponse = { text: 'Based on our documents, a root canal costs $1200.', tokens: 20, model: 'test-model' };
+    const aiResponse = { text: 'Based on our documents, a root canal costs $1200.', promptTokens: 10, completionTokens: 10, totalTokens: 20, model: 'test-model' };
 
     // Setup mocks for this test case
     mockMessageService.getConversationHistory.mockResolvedValue([]);
@@ -132,7 +132,7 @@ describe('AI Orchestrator RAG Pipeline', () => {
     );
 
     // 5. Verify usage was tracked with cost
-    expect(mockCostService.calculateCost).toHaveBeenCalledWith(aiResponse.model, aiResponse.tokens);
+    expect(mockCostService.calculateCost).toHaveBeenCalledWith(aiResponse.model, aiResponse.promptTokens, aiResponse.completionTokens);
     expect(mockSupabase.supabase.from('ai_usage').insert).toHaveBeenCalledWith([expect.objectContaining({ estimated_cost: 0.0002 })]);
   });
 

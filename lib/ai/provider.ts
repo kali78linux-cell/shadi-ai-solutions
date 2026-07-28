@@ -7,7 +7,9 @@ export type GenerateParams = {
 
 export type GenerateResult = {
   text: string;
-  tokens?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
   model?: string;
   raw?: unknown;
 };

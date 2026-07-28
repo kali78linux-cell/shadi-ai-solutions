@@ -1,10 +1,5 @@
 import { ClinicAISettings, Message } from '@/types/db';
-
-type ContextChunk = {
-  id: string;
-  content: string;
-  similarity: number;
-};
+import { RetrievalResult } from '@/lib/services/knowledge/retrieval';
 
 type HistoryMessage = Pick<Message, 'role' | 'content'>;
 
@@ -30,26 +25,31 @@ Question: {question}`;
  * @param settings The clinic's AI settings.
  * @param question The user's original question.
  * @param history The recent conversation history.
- * @param contextChunks The context chunks retrieved from the vector database.
+ * @param rankedContext The ranked and filtered context chunks from the retrieval service.
  * @returns The final prompt string.
  */
-export function buildPrompt(settings: ClinicAISettings | null, question: string, history: HistoryMessage[], contextChunks: ContextChunk[]): string {
+export function buildPrompt(settings: ClinicAISettings | null, question: string, history: HistoryMessage[], rankedContext: RetrievalResult[]): string {
   const assistantName = settings?.assistant_name || 'AI Assistant';
   const tone = settings?.tone || 'professional and friendly';
   const language = settings?.language || 'the user\'s language';
-  const context = contextChunks.map(chunk => chunk.content).join('\n\n');
+
+  // Build context string with source citations
+  const context = rankedContext
+    .map(chunk => `[Source: ${chunk.document?.original_filename || 'knowledge base'}, ID: ${chunk.document_id}, Chunk: ${chunk.chunk_index}]\n${chunk.content}`)
+    .join('\n\n');
 
   const historyString = history.length > 0
     ? 'Here is the recent conversation history:\n' + history.map(msg => `${msg.role === 'patient' ? 'User' : 'Assistant'}: ${msg.content}`).join('\n')
     : '';
 
+  // Hallucination Prevention: If no relevant context is found, instruct the AI to admit it.
   if (!context.trim()) {
     // If no context is found, pass the question through with a basic instruction.
     let fallbackPrompt = `You are a helpful assistant for a dental clinic named {assistant_name}.
 Your tone should be {tone}.
 You must respond in {language}.
 {history}
-Answer the user's question.
+Answer the user's question. If you don't know the answer, say "I'm sorry, I don't have that information."
 
 Question: {question}`;
     fallbackPrompt = fallbackPrompt.replace('{assistant_name}', assistantName);

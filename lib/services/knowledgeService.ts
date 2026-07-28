@@ -57,24 +57,33 @@ export class KnowledgeService {
       throw new Error(`Failed to create document record: ${dbError.message}`);
     }
 
-    // Asynchronously process the document. In a real app, this would be a background job.
-    this.processDocument(docData.id, file);
+    // Asynchronously invoke the Edge Function to process the document in the background.
+    await this.supabase.functions.invoke('process-document', {
+      body: { documentId: docData.id, storagePath },
+    });
 
     return docData as ClinicKnowledgeDocument;
   }
 
+  /**
+   * Processes a document by parsing, chunking, and embedding its content.
+   * This method contains the core ingestion logic and is used for testing.
+   * In production, this logic is executed within a Supabase Edge Function.
+   */
   async processDocument(documentId: string, file: File) {
+    // This method is preserved for testing purposes, allowing direct validation
+    // of the ingestion pipeline without invoking an edge function.
     try {
-      await this.updateDocumentStatus(documentId, 'processing');
       const fileBuffer = Buffer.from(await file.arrayBuffer());
       const content = await extractTextFromBuffer(fileBuffer, file.name);
-
-      await this.updateDocumentStatus(documentId, 'chunking');
       const chunks = chunkText(content);
-
-      await this.updateDocumentStatus(documentId, 'embedding');
       const provider = getProvider();
-      const clinicId = (await this.supabase.from('clinic_knowledge_documents').select('clinic_id').eq('id', documentId).single()).data?.clinic_id;
+      const { data: doc } = await this.supabase.from('clinic_knowledge_documents').select('clinic_id').eq('id', documentId).single();
+      const clinicId = doc?.clinic_id;
+
+      if (!clinicId) {
+        throw new Error(`Could not find clinic for document ${documentId}`);
+      }
 
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
@@ -85,19 +94,57 @@ export class KnowledgeService {
           type: 'unstructured',
           content: chunk,
           chunk_index: i,
-          embedding_vector: embedding, // Use the new vector column
+          embedding_vector: embedding,
         });
         if (chunkError) throw chunkError;
       }
-
-      await this.supabase.from('clinic_knowledge_documents').update({ processing_status: 'indexed', chunk_count: chunks.length, indexed_at: new Date().toISOString() }).eq('id', documentId);
     } catch (error) {
-      console.error(`Error processing document ${documentId}:`, error);
-      await this.updateDocumentStatus(documentId, 'error');
+      console.error(`Error in processDocument for test harness: ${documentId}`, error);
+      throw error;
     }
   }
 
-  private async updateDocumentStatus(documentId: string, status: ClinicKnowledgeDocument['processing_status']) {
-    await this.supabase.from('clinic_knowledge_documents').update({ processing_status: status }).eq('id', documentId);
+  async deleteDocument(documentId: string, clinicId: string) {
+    // First, get the document to ensure it belongs to the clinic and to get its storage path.
+    const { data: document, error: docError } = await this.supabase
+      .from('clinic_knowledge_documents')
+      .select('storage_path, clinic_id')
+      .eq('id', documentId)
+      .single();
+
+    if (docError || !document) {
+      throw new Error('Document not found.');
+    }
+
+    if (document.clinic_id !== clinicId) {
+      throw new Error('Forbidden: Document does not belong to this clinic.');
+    }
+
+    // 1. Soft delete the document record first.
+    await this.supabase.from('clinic_knowledge_documents').update({ deleted_at: new Date().toISOString() }).eq('id', documentId);
+
+    // 2. Delete associated chunks from the knowledge base.
+    await this.supabase.from('clinic_ai_knowledge').delete().eq('document_id', documentId);
+
+    // 3. Delete the file from storage.
+    if (document.storage_path) {
+      await this.supabase.storage.from('knowledge_documents').remove([document.storage_path]);
+    }
+  }
+
+  async reindexDocument(documentId: string, clinicId: string) {
+    const { data: document, error: docError } = await this.supabase.from('clinic_knowledge_documents').select('storage_path, clinic_id').eq('id', documentId).single();
+    if (docError || !document) throw new Error('Document not found.');
+    if (document.clinic_id !== clinicId) throw new Error('Forbidden: Document does not belong to this clinic.');
+
+    await this.supabase.from('clinic_ai_knowledge').delete().eq('document_id', documentId);
+
+    const { data: updatedDoc, error: updateError } = await this.supabase.from('clinic_knowledge_documents').update({ processing_status: 'pending', chunk_count: null, indexed_at: null, deleted_at: null }).eq('id', documentId).select().single();
+    if (updateError) throw new Error(`Failed to reset document status: ${updateError.message}`);
+
+    if (!document.storage_path) throw new Error('Document has no storage path and cannot be re-indexed.');
+    await this.supabase.functions.invoke('process-document', { body: { documentId, storagePath: document.storage_path } });
+
+    return updatedDoc;
   }
 }

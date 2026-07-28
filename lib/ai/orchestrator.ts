@@ -9,7 +9,7 @@ import { getConversationHistory } from '@/lib/services/messageService';
 import { updateConversationState } from '@/lib/services/conversationService';
 import { notifyStaffForHandoff } from '@/lib/services/notificationService';
 import { calculateCost } from '@/lib/services/aiCostService';
-import { sanitizeForPrompt } from './security';
+import { moderateUserPrompt, ContentFlaggedError } from './security';
 
 // Register example providers
 registerProvider(OpenAIProvider);
@@ -63,12 +63,20 @@ export async function handleIncomingMessage(opts: {
     }
 
     // --- Conversational Memory & Context ---
-    const sanitizedText = sanitizeForPrompt(text);
+    // Security: Moderate user input before processing
+    try {
+      await moderateUserPrompt(text);
+    } catch (error) {
+      if (error instanceof ContentFlaggedError) {
+        // Stop processing if content is flagged, but don't crash.
+        return null;
+      }
+    }
     const history = await getConversationHistory(conversationId, 10);
-    const context = await retrieveContext(clinicId, sanitizedText, 5);
+    const context = await retrieveContext(clinicId, text, 5);
 
     // --- Prompt Construction ---
-    const prompt = buildPrompt(settingsData || null, sanitizedText, history, context as any[]);
+    const prompt = buildPrompt(settingsData || null, text, history, context as any[]);
 
     const provider = getProvider(modelPreference || undefined);
 
@@ -83,7 +91,8 @@ export async function handleIncomingMessage(opts: {
         clinic_id: clinicId,
         role: 'assistant',
         content: result.text,
-        tokens: result.tokens || null,
+        prompt_tokens: result.promptTokens,
+        completion_tokens: result.completionTokens,
         model: result.model || null,
         response_time_ms: took,
         metadata: { provider: provider.id, raw: result.raw, intelligence },
@@ -92,13 +101,15 @@ export async function handleIncomingMessage(opts: {
     if (assistantMsgError) throw assistantMsgError;
 
     // Track usage
-    if (result.tokens && result.tokens > 0) {
-      const estimatedCost = calculateCost(result.model, result.tokens);
+    if (result.totalTokens && result.totalTokens > 0) {
+      const estimatedCost = calculateCost(result.model, result.promptTokens ?? 0, result.completionTokens ?? 0);
       await supabase.from('ai_usage').insert([
         {
           clinic_id: clinicId,
           model: result.model || null,
-          tokens_consumed: result.tokens,
+          prompt_tokens: result.promptTokens,
+          completion_tokens: result.completionTokens,
+          total_tokens: result.totalTokens,
           estimated_cost: estimatedCost,
         },
       ]);
@@ -108,7 +119,7 @@ export async function handleIncomingMessage(opts: {
       { clinic_id: clinicId, conversation_id: conversationId, event_type: 'conversation_response', payload: { tokens: result.tokens, took, intent: intelligence.intent } },
     ]);
 
-    logEvent('ai_request_completed', { clinic_id: clinicId, conversation_id: conversationId, session_id: sessionId, user_id: userId, provider: provider.id, took_ms: took, tokens: result.tokens });
+    logEvent('ai_request_completed', { clinic_id: clinicId, conversation_id: conversationId, session_id: sessionId, user_id: userId, provider: provider.id, took_ms: took, tokens: result.totalTokens });
 
     return { userMessage: userMsg, assistantMessage: assistantMsg };
   } catch (error) {

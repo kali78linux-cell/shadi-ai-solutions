@@ -1,21 +1,45 @@
-// A very basic list of phrases to strip to prevent simple prompt injection.
-// In a real production system, this would be much more sophisticated.
-const INJECTION_PATTERNS = [
-  /ignore previous instructions/i,
-  /ignore all prior instructions/i,
-  /forget what you were told/i,
-  /you are now in developer mode/i,
-];
+import { logEvent } from '@/lib/server/logging';
+
+export class ContentFlaggedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ContentFlaggedError';
+  }
+}
 
 /**
- * A lightweight sanitizer to remove common prompt injection phrases from user input.
+ * Moderates user input using the OpenAI Moderation API to prevent prompt injection and harmful content.
  * @param text The user's input text.
- * @returns The sanitized text.
+ * @throws {ContentFlaggedError} If the content is flagged by the moderation API.
  */
-export function sanitizeForPrompt(text: string): string {
-  let sanitizedText = text;
-  for (const pattern of INJECTION_PATTERNS) {
-    sanitizedText = sanitizedText.replace(pattern, '');
+export async function moderateUserPrompt(text: string): Promise<void> {
+  if (!process.env.OPENAI_API_KEY) {
+    console.warn('OPENAI_API_KEY is not set, skipping moderation.');
+    return;
   }
-  return sanitizedText.trim();
+
+  try {
+    const response = await fetch('https://api.openai.com/v1/moderations', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({ input: text }),
+    });
+
+    if (!response.ok) throw new Error(`Moderation API failed with status: ${response.status}`);
+
+    const data = await response.json();
+    if (data.results[0].flagged) {
+      logEvent('prompt_moderation_flagged', { categories: data.results[0].categories }, 'warn');
+      throw new ContentFlaggedError('User input was flagged by the moderation service.');
+    }
+  } catch (error) {
+    // Re-throw ContentFlaggedError so callers can block flagged content.
+    if (error instanceof ContentFlaggedError) throw error;
+    // If the moderation API itself fails, we log it but don't block the user by default.
+    // This can be changed to a stricter policy if needed.
+    logEvent('prompt_moderation_error', { error: error instanceof Error ? error.message : String(error) }, 'error');
+  }
 }

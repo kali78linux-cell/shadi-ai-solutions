@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { vectorSearchClinic } from '@/lib/services/knowledge/retrieval';
+import { RetrievalResult } from '@/lib/services/knowledge/retrieval';
 
 // Mock dependencies
 const mockProvider = vi.hoisted(() => ({
@@ -36,7 +37,7 @@ describe('Knowledge Retrieval Service', () => {
     const clinicId = 'clinic-123';
     const query = 'How much for a cleaning?';
     const mockEmbedding = [0.1, 0.2, 0.3];
-    const mockChunks = [{ id: 'chunk-1', content: 'A cleaning costs $100.', similarity: 0.9 }];
+    const mockChunks: RetrievalResult[] = [{ id: 'chunk-1', content: 'A cleaning costs $100.', similarity: 0.9, document_id: 'doc-1', chunk_index: 0, metadata: {} }];
 
     mockEmbedProvider.embed.mockResolvedValue({ embedding: mockEmbedding });
     mockSupabase.supabase.rpc.mockResolvedValue({ data: mockChunks, error: null });

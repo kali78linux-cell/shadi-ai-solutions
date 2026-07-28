@@ -1,4 +1,5 @@
 import { vectorSearchClinic } from '@/lib/services/knowledge/retrieval';
+import { rankAndFilterResults } from '@/lib/services/knowledge/ranking';
 
 /**
  * Retrieves context from the knowledge base relevant to the user's query.
@@ -8,7 +9,8 @@ import { vectorSearchClinic } from '@/lib/services/knowledge/retrieval';
  * @returns A promise that resolves to an array of context chunks.
  */
 export async function retrieveContext(clinicId: string, text: string, k: number) {
-  // The 'k' parameter from the orchestrator is ignored in favor of the
-  // constants defined within the vectorSearchClinic service.
-  return await vectorSearchClinic(clinicId, text);
+  const initialResults = await vectorSearchClinic(clinicId, text);
+  const rankedResults = rankAndFilterResults(initialResults);
+  // The 'k' parameter from the orchestrator can be used here to limit the final results if needed.
+  return rankedResults.slice(0, k);
 }

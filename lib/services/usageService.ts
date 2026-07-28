@@ -30,14 +30,14 @@ export async function getClinicUsageSummary(clinicId: string, from: string, to: 
   // Fetch aggregated token and cost data
   const { data: usageData, error: usageError } = await supabase
     .from('ai_usage')
-    .select('tokens_consumed, estimated_cost')
+    .select('total_tokens, estimated_cost')
     .eq('clinic_id', clinicId)
     .gte('created_at', from)
     .lte('created_at', to);
 
   if (usageError) throw usageError;
 
-  const totalTokens = usageData.reduce((sum, row) => sum + (row.tokens_consumed || 0), 0);
+  const totalTokens = usageData.reduce((sum, row) => sum + (row.total_tokens || 0), 0);
   const totalEstimatedCost = usageData.reduce((sum, row) => sum + (row.estimated_cost || 0), 0);
 
   return { clinicId, dateRange: { from, to }, totalMessages: messageCount ?? 0, totalTokens, totalEstimatedCost };

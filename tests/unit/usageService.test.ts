@@ -28,9 +28,9 @@ describe('Usage Service', () => {
 
     // Mock usage data
     const mockUsageData = [
-      { tokens_consumed: 10000, estimated_cost: 0.1 },
-      { tokens_consumed: 25000, estimated_cost: 0.25 },
-      { tokens_consumed: 5000, estimated_cost: 0.05 },
+      { total_tokens: 10000, estimated_cost: 0.1 },
+      { total_tokens: 25000, estimated_cost: 0.25 },
+      { total_tokens: 5000, estimated_cost: 0.05 },
     ];
     mockSupabase.supabase.from('ai_usage').select.mockResolvedValue({ data: mockUsageData, error: null });
 
@@ -44,7 +44,7 @@ describe('Usage Service', () => {
 
     // Verify usage query
     expect(mockSupabase.supabase.from).toHaveBeenCalledWith('ai_usage');
-    expect(mockSupabase.supabase.from('ai_usage').select).toHaveBeenCalledWith('tokens_consumed, estimated_cost');
+    expect(mockSupabase.supabase.from('ai_usage').select).toHaveBeenCalledWith('total_tokens, estimated_cost');
     expect(mockSupabase.supabase.from('ai_usage').eq).toHaveBeenCalledWith('clinic_id', clinicId);
     expect(mockSupabase.supabase.from('ai_usage').gte).toHaveBeenCalledWith('created_at', from);
     expect(mockSupabase.supabase.from('ai_usage').lte).toHaveBeenCalledWith('created_at', to);

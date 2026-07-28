@@ -83,7 +83,8 @@ export type Message = {
   role: 'patient' | 'assistant' | 'staff' | 'system';
   content: string;
   content_json?: Record<string, unknown> | null;
-  tokens?: number | null;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
   model?: string | null;
   response_time_ms?: number | null;
   metadata?: Record<string, unknown> | null;
@@ -184,7 +185,9 @@ export type AIUsage = {
   id: string;
   clinic_id: string;
   model?: string | null;
-  tokens_consumed: number;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  total_tokens: number;
   estimated_cost?: number | null;
   period_start?: string | null;
   period_end?: string | null;
@@ -227,8 +230,8 @@ export type Notification = {
   user_id?: string | null;
   patient_id?: string | null;
   appointment_id?: string | null;
-  channel: 'email' | 'sms';
-  type: 'appointment_reminder' | 'billing' | 'system';
+  channel: 'email' | 'sms' | 'dashboard';
+  type: 'appointment_reminder' | 'billing' | 'system' | 'human_handoff';
   payload: Record<string, unknown>;
   sent_at?: string | null;
   delivered_at?: string | null;

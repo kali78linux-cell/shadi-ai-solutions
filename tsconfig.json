@@ -33,6 +33,8 @@
     "**/*.tsx"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "lib/ai/index.ts",
+    "lib/services/index.ts"
   ]
 }

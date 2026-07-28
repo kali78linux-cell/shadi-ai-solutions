@@ -20,6 +20,7 @@ const mockSupabase = {
     from: vi.fn().mockReturnThis(),
     upload: vi.fn(),
     remove: vi.fn(),
+    functions: { invoke: vi.fn() },
   },
   from: vi.fn().mockReturnThis(),
   insert: vi.fn().mockReturnThis(),
@@ -62,8 +63,6 @@ describe('KnowledgeService', () => {
     mockSupabase.select.mockReturnThis();
     mockSupabase.single.mockResolvedValue({ data: mockDocumentRecord, error: null });
 
-    const processDocumentSpy = vi.spyOn(knowledgeService, 'processDocument').mockImplementation(async () => {});
-
     const result = await knowledgeService.handleUpload({ file, clinicId, userId });
 
     expect(mockSupabase.storage.from).toHaveBeenCalledWith('knowledge_documents');
@@ -79,7 +78,9 @@ describe('KnowledgeService', () => {
       processing_status: 'pending',
     }));
 
-    expect(processDocumentSpy).toHaveBeenCalledWith(mockDocumentRecord.id, file);
+    expect(mockSupabase.functions.invoke).toHaveBeenCalledWith('process-document', {
+      body: { documentId: mockDocumentRecord.id, storagePath: `${clinicId}/mock-uuid.txt` },
+    });
     expect(result).toEqual(mockDocumentRecord);
   });
 
@@ -117,49 +118,68 @@ describe('KnowledgeService', () => {
     expect(mockSupabase.storage.remove).toHaveBeenCalledWith([`${clinicId}/mock-uuid.txt`]);
   });
 
-  it('should process a document by parsing, chunking, and embedding', async () => {
-    const file = new File(['full document content'], 'test.txt', { type: 'text/plain' });
-    const documentId = 'doc-id-123';
-    const clinicId = 'clinic-id-456';
+  it('should soft delete a document and remove its file from storage', async () => {
+    const documentId = 'doc-to-delete';
+    const clinicId = 'test-clinic-id';
+    const storagePath = `${clinicId}/file.pdf`;
 
-    // Mock return values
-    mockDocParser.extractTextFromBuffer.mockResolvedValue('full document content');
-    mockDocParser.chunkText.mockReturnValue(['chunk 1', 'chunk 2']);
-    mockEmbeddingProvider.generateEmbedding.mockResolvedValue([0.1, 0.2, 0.3]);
-    mockSupabase.from('clinic_knowledge_documents').select('clinic_id').eq('id', documentId).single.mockResolvedValue({ data: { clinic_id: clinicId }, error: null });
-    mockSupabase.from('clinic_ai_knowledge').insert.mockResolvedValue({ error: null });
+    mockSupabase.from('clinic_knowledge_documents').select().eq().single.mockResolvedValue({
+      data: { id: documentId, clinic_id: clinicId, storage_path: storagePath },
+      error: null,
+    });
+    mockSupabase.from('clinic_ai_knowledge').delete().eq.mockResolvedValue({ error: null });
     mockSupabase.from('clinic_knowledge_documents').update.mockResolvedValue({ error: null });
+    mockSupabase.storage.from('knowledge_documents').remove.mockResolvedValue({ data: {}, error: null });
 
-    await knowledgeService.processDocument(documentId, file);
+    await knowledgeService.deleteDocument(documentId, clinicId);
 
-    // Verify status updates
-    expect(mockSupabase.from('clinic_knowledge_documents').update).toHaveBeenCalledWith({ processing_status: 'processing' });
-    expect(mockSupabase.from('clinic_knowledge_documents').update).toHaveBeenCalledWith({ processing_status: 'chunking' });
-    expect(mockSupabase.from('clinic_knowledge_documents').update).toHaveBeenCalledWith({ processing_status: 'embedding' });
+    // Verify document is soft-deleted
+    expect(mockSupabase.from).toHaveBeenCalledWith('clinic_knowledge_documents');
+    expect(mockSupabase.from('clinic_knowledge_documents').update).toHaveBeenCalledWith(
+      expect.objectContaining({ deleted_at: expect.any(String) })
+    );
 
-    // Verify processing steps
-    expect(mockDocParser.extractTextFromBuffer).toHaveBeenCalledWith(expect.any(Buffer), 'test.txt');
-    expect(mockDocParser.chunkText).toHaveBeenCalledWith('full document content');
-    expect(mockProvider.getProvider).toHaveBeenCalled();
-    expect(mockEmbeddingProvider.generateEmbedding).toHaveBeenCalledTimes(2);
-    expect(mockEmbeddingProvider.generateEmbedding).toHaveBeenCalledWith('chunk 1');
-    expect(mockEmbeddingProvider.generateEmbedding).toHaveBeenCalledWith('chunk 2');
+    // Verify chunks are deleted after the document is soft-deleted
+    expect(mockSupabase.from).toHaveBeenCalledWith('clinic_ai_knowledge');
+    expect(mockSupabase.from('clinic_ai_knowledge').delete().eq).toHaveBeenCalledWith('document_id', documentId);
 
-    // Verify database inserts for chunks
-    expect(mockSupabase.from('clinic_ai_knowledge').insert).toHaveBeenCalledTimes(2);
-    expect(mockSupabase.from('clinic_ai_knowledge').insert).toHaveBeenCalledWith({
-      document_id: documentId,
-      clinic_id: clinicId,
-      type: 'unstructured',
-      content: 'chunk 1',
-      chunk_index: 0,
-      embedding_vector: [0.1, 0.2, 0.3],
+    // Verify file is removed from storage at the end
+    expect(mockSupabase.storage.from).toHaveBeenCalledWith('knowledge_documents');
+    expect(mockSupabase.storage.remove).toHaveBeenCalledWith([storagePath]);
+  });
+
+  it('should re-index a document', async () => {
+    const documentId = 'doc-to-reindex';
+    const clinicId = 'test-clinic-id';
+    const storagePath = `${clinicId}/file.pdf`;
+    const updatedDoc = { id: documentId, processing_status: 'pending' };
+
+    mockSupabase.from('clinic_knowledge_documents').select().eq().single.mockResolvedValue({
+      data: { id: documentId, clinic_id: clinicId, storage_path: storagePath },
+      error: null,
+    });
+    mockSupabase.from('clinic_ai_knowledge').delete().eq.mockResolvedValue({ error: null });
+    mockSupabase.from('clinic_knowledge_documents').update().eq().select().single.mockResolvedValue({
+      data: updatedDoc,
+      error: null,
+    });
+    mockSupabase.functions.invoke.mockResolvedValue({ data: {}, error: null });
+
+    const result = await knowledgeService.reindexDocument(documentId, clinicId);
+
+    // Verify old chunks are deleted
+    expect(mockSupabase.from('clinic_ai_knowledge').delete().eq).toHaveBeenCalledWith('document_id', documentId);
+
+    // Verify document status is reset
+    expect(mockSupabase.from('clinic_knowledge_documents').update).toHaveBeenCalledWith(
+      expect.objectContaining({ processing_status: 'pending' })
+    );
+
+    // Verify edge function is invoked
+    expect(mockSupabase.functions.invoke).toHaveBeenCalledWith('process-document', {
+      body: { documentId, storagePath },
     });
 
-    // Verify final status update
-    expect(mockSupabase.from('clinic_knowledge_documents').update).toHaveBeenCalledWith(expect.objectContaining({
-      processing_status: 'indexed',
-      chunk_count: 2,
-    }));
+    expect(result).toEqual(updatedDoc);
   });
 });

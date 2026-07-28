@@ -2,8 +2,8 @@
 -- db/migrations/20260723_communication_gateway.sql
 
 CREATE TABLE gateway_channels (
-  id SERIAL PRIMARY KEY,
-  clinic_id INTEGER NOT NULL REFERENCES clinics(id),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  clinic_id UUID NOT NULL REFERENCES public.clinics(id) ON DELETE CASCADE,
   channel_type VARCHAR(20) NOT NULL,
   enabled BOOLEAN DEFAULT TRUE,
   settings JSONB,
@@ -13,7 +13,7 @@ CREATE TABLE gateway_channels (
 
 CREATE TABLE gateway_messages (
   id SERIAL PRIMARY KEY,
-  channel_id INTEGER REFERENCES gateway_channels(id),
+  channel_id UUID REFERENCES gateway_channels(id),
   message_id VARCHAR(255) UNIQUE,
   conversation_id VARCHAR(255),
   sender_id VARCHAR(255),
