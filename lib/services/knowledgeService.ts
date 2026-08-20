@@ -1,4 +1,4 @@
-import { SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { ClinicKnowledgeDocument } from '@/types/db';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
@@ -58,9 +58,18 @@ export class KnowledgeService {
     }
 
     // Asynchronously invoke the Edge Function to process the document in the background.
-    await this.supabase.functions.invoke('process-document', {
-      body: { documentId: docData.id, storagePath },
-    });
+    try {
+      await this.supabase.functions.invoke('process-document', {
+        body: { documentId: docData.id, storagePath },
+      });
+    } catch (error) {
+      console.error('Edge function invocation failed, marking document as failed:', error);
+      await this.supabase
+        .from('clinic_knowledge_documents')
+        .update({ processing_status: 'failed' })
+        .eq('id', docData.id);
+      throw new Error(`Failed to process document: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
 
     return docData as ClinicKnowledgeDocument;
   }
@@ -85,21 +94,42 @@ export class KnowledgeService {
         throw new Error(`Could not find clinic for document ${documentId}`);
       }
 
+      // Build all chunk rows with embeddings before inserting
+      const chunkRows = [];
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
-        const embedding = await provider.generateEmbedding(chunk);
-        const { error: chunkError } = await this.supabase.from('clinic_ai_knowledge').insert({
+        const embedResult = await provider.embed(chunk);
+        chunkRows.push({
           document_id: documentId,
           clinic_id: clinicId,
           type: 'unstructured',
           content: chunk,
           chunk_index: i,
-          embedding_vector: embedding,
+          embedding: embedResult.embedding,
         });
-        if (chunkError) throw chunkError;
       }
+
+      // Insert all chunks as a single batch (array) — document metadata is updated
+      // only after this succeeds, so a failed insert leaves the document consistent.
+      const { error: chunkError } = await this.supabase.from('clinic_ai_knowledge').insert(chunkRows);
+      if (chunkError) throw chunkError;
+
+      // Update document status to indexed and record chunk count + indexed_at
+      await this.supabase
+        .from('clinic_knowledge_documents')
+        .update({
+          processing_status: 'indexed',
+          chunk_count: chunks.length,
+          indexed_at: new Date().toISOString(),
+        })
+        .eq('id', documentId);
     } catch (error) {
       console.error(`Error in processDocument for test harness: ${documentId}`, error);
+      // Mark the document as failed so it doesn't stay stuck in "pending"
+      await this.supabase
+        .from('clinic_knowledge_documents')
+        .update({ processing_status: 'failed' })
+        .eq('id', documentId);
       throw error;
     }
   }

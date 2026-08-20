@@ -3,12 +3,7 @@
 import { FormEvent, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { supabase, isSupabaseConfigured } from '@/lib/supabase';
-
-const DEMO_USER = {
-  email: 'shadisuad78@gmail.com',
-  password: '111978',
-};
+import { supabase } from '@/lib/supabase';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -17,42 +12,45 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  function humanizeError(message: string): string {
+    if (!message) return 'تعذر تسجيل الدخول. يرجى المحاولة مرة أخرى.';
+    if (message.includes('Invalid login credentials')) {
+      return 'البريد الإلكتروني أو كلمة المرور غير صحيحة.';
+    }
+    if (message.includes('Email not confirmed')) {
+      return 'لم يتم تأكيد البريد الإلكتروني بعد. يرجى التحقق من بريدك.';
+    }
+    if (message.includes('fetch') || message.includes('Failed to fetch') || message.includes('Network')) {
+      return 'تعذر الاتصال بخدمة المصادقة. تحقق من اتصالك بالإنترنت ثم أعد المحاولة.';
+    }
+    if (message.includes('rate limit') || message.includes('Too many')) {
+      return 'محاولات كثيرة. يرجى الانتظار قليلاً ثم إعادة المحاولة.';
+    }
+    return message;
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
     setIsSubmitting(true);
 
-    if (!isSupabaseConfigured) {
-      if (email === DEMO_USER.email && password === DEMO_USER.password) {
-        localStorage.setItem('dentalai_demo_session', 'true');
-        router.replace('/dashboard');
-      } else {
-        setError('البريد الإلكتروني أو كلمة المرور غير صحيحة. استخدم معلومات العرض التجريبي.');
+    try {
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (signInError) {
+        setError(humanizeError(signInError.message));
+        setIsSubmitting(false);
+        return;
       }
+
+      router.replace('/dashboard');
+    } catch (caught) {
+      setError('تعذر الاتصال بخدمة المصادقة. تحقق من اتصالك بالإنترنت ثم أعد المحاولة.');
       setIsSubmitting(false);
-      return;
     }
-
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    setIsSubmitting(false);
-
-    if (signInError) {
-      setError(signInError.message);
-      return;
-    }
-
-    router.replace('/dashboard');
-  }
-
-  function handleDemoLogin() {
-    setEmail(DEMO_USER.email);
-    setPassword(DEMO_USER.password);
-    localStorage.setItem('dentalai_demo_session', 'true');
-    router.replace('/dashboard');
   }
 
   return (
@@ -103,27 +101,11 @@ export default function LoginPage() {
         </form>
 
         <div className="mt-6 text-center text-sm text-slate-500">
-          <p>إذا لم يكن لديك حساب، اضبط مستخدم Supabase في لوحة التحكم لتجربة الحماية.</p>
+          <p>ليس لديك حساب؟</p>
+          <Link href="/register" className="mt-1 inline-block font-medium text-cyan-300 hover:text-cyan-200">
+            إنشاء حساب جديد
+          </Link>
         </div>
-
-        <div className="mt-6 text-center text-sm text-slate-500">
-          <p>إذا لم يكن لديك حساب، يمكنك استخدام تسجيل الدخول التجريبي المحلي أو ضبط Supabase.</p>
-        </div>
-
-        {!isSupabaseConfigured && (
-          <div className="mt-6 flex flex-col items-center gap-3">
-            <button
-              type="button"
-              onClick={handleDemoLogin}
-              className="w-full rounded-3xl bg-cyan-500 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400"
-            >
-              تسجيل دخول تجريبي
-            </button>
-            <p className="text-xs text-slate-500">
-              بريد العرض: {DEMO_USER.email} · كلمة المرور: {DEMO_USER.password}
-            </p>
-          </div>
-        )}
 
         <div className="mt-8 text-center">
           <Link href="/" className="text-sm font-medium text-cyan-300 hover:text-cyan-200">

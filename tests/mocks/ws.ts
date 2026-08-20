@@ -36,6 +36,7 @@ class MockServerConnection {
 class MockClientWebSocket {
   static OPEN = 1;
   static CLOSED = 3;
+  static Server: any;
 
   readyState = MockClientWebSocket.OPEN;
   private readonly handlers: EventMap = {};
@@ -116,5 +117,6 @@ WebSocketModule.OPEN = MockClientWebSocket.OPEN as 1;
 
 export const OPEN = MockClientWebSocket.OPEN;
 export class Server extends MockServer {}
+export class WebSocketServer extends MockServer {}
 export class WebSocket extends MockClientWebSocket {}
 export default WebSocket;

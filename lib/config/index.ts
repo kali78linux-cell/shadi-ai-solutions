@@ -1,13 +1,15 @@
 import type { SupabaseConfig } from '@/types/config';
 
-// Guard access to `process` so this module can be imported on the client
-const env = typeof process !== 'undefined' && process?.env ? process.env : {} as Record<string, string | undefined>;
-
+// IMPORTANT: Next.js statically inlines `process.env.NEXT_PUBLIC_*` references
+// into the client bundle ONLY when they are referenced directly (not via a
+// dynamic `process.env` object lookup). We must reference them directly here
+// so the browser receives the real URL + anon key.
+// SUPABASE_SERVICE_ROLE_KEY is NOT NEXT_PUBLIC_*, so it is never inlined into
+// the client bundle — it stays server-only.
 export function getSupabaseEnvConfig(): SupabaseConfig {
-  // Only public NEXT_PUBLIC_* keys are relevant on the client
-  const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-  const anonKey = env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
-  const serviceRoleKey = env.SUPABASE_SERVICE_ROLE_KEY ?? '';
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
 
   return {
     supabaseUrl,
@@ -30,7 +32,7 @@ export function requireSupabaseConfig(): SupabaseConfig {
 }
 
 export function getSetupAuthToken(): string | null {
-  return env.SUPABASE_SETUP_TOKEN ?? null;
+  return process.env.SUPABASE_SETUP_TOKEN ?? null;
 }
 
 export function isValidSetupToken(token?: string): boolean {

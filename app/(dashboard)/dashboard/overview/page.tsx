@@ -8,7 +8,7 @@ import Sparkline from '@/components/dashboard/Sparkline';
 import StatusPill from '@/components/dashboard/StatusPill';
 import Skeleton from '@/components/ui/Skeleton';
 import EmptyState from '@/components/dashboard/EmptyState';
-import { isSupabaseConfigured } from '@/lib/supabase';
+import { useSupabaseConfig } from '@/lib/useSupabaseConfig';
 
 type DashboardSnapshot = {
   appointmentsCount: number;
@@ -23,6 +23,7 @@ type DashboardSnapshot = {
 const chartSeries = [12, 18, 16, 20, 24, 22, 28];
 
 export default function OverviewPage() {
+  const { isConfigured: isSupabaseConfigured } = useSupabaseConfig();
   const [data, setData] = useState<DashboardSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

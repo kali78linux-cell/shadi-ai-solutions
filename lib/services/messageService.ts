@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 import { Message } from '@/types/db';
 import { handleIncomingMessage } from '@/lib/ai/orchestrator';
 
@@ -10,13 +10,13 @@ export async function saveMessage(payload: {
   content?: string | null;
   content_json?: Record<string, unknown> | null;
 }) {
-  const { data, error } = await supabase.from('messages').insert([payload]).select('*').single();
+  const { data, error } = await supabaseAdmin.from('messages').insert([payload]).select('*').single();
   if (error) throw error;
   return data;
 }
 
 export async function getConversationHistory(conversationId: string, limit = 10): Promise<Pick<Message, 'role' | 'content'>[]> {
-  const { data, error } = await supabase.from('messages').select('role, content').eq('conversation_id', conversationId).order('created_at', { ascending: false }).limit(limit);
+  const { data, error } = await supabaseAdmin.from('messages').select('role, content').eq('conversation_id', conversationId).order('created_at', { ascending: false }).limit(limit);
   if (error) throw error;
   return (data as Pick<Message, 'role' | 'content'>[]).reverse(); // Reverse to get chronological order
 }

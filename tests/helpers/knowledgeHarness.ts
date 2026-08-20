@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import type { AIProvider } from '@/lib/ai/provider';
 import { registerProvider, clearProviders } from '@/lib/ai/provider';
 import type { ClinicKnowledgeDocument, ClinicAIKnowledge } from '@/types/db';
@@ -25,13 +26,24 @@ export function createKnowledgeTestHarness() {
     from(table: string) {
       if (table === 'clinic_knowledge_documents') {
         return {
-          insert(rows: any[]) {
-            const doc = { ...rows[0], id: `doc-${documentStore.length + 1}`, created_at: new Date().toISOString() };
+          insert(rows: any) {
+            const row = Array.isArray(rows) ? rows[0] : rows;
+            const doc = { ...row, id: `doc-${documentStore.length + 1}`, created_at: new Date().toISOString() };
             documentStore.push(doc);
             return {
               select: () => ({
                 single: () => ({ data: doc, error: null }),
               }),
+            };
+          },
+          select(columns: string) {
+            return {
+              eq: (field: string, value: string) => {
+                const doc = documentStore.find((d) => (d as any)[field] === value);
+                return {
+                  single: () => ({ data: doc || null, error: null }),
+                };
+              },
             };
           },
           update(values: Partial<ClinicKnowledgeDocument>) {
@@ -48,8 +60,9 @@ export function createKnowledgeTestHarness() {
 
       if (table === 'clinic_ai_knowledge') {
         return {
-          insert(rows: any[]) {
-            const inserted = rows.map((row, i) => ({
+          insert(rows: any) {
+            const rowArray = Array.isArray(rows) ? rows : [rows];
+            const inserted = rowArray.map((row, i) => ({
               ...row,
               id: `chunk-${chunkStore.length + i + 1}`,
             })) as ClinicAIKnowledge[];
@@ -71,6 +84,17 @@ export function createKnowledgeTestHarness() {
       }
 
       throw new Error(`Test harness does not support table: ${table}`);
+    },
+    storage: {
+      from(bucket: string) {
+        return {
+          upload: vi.fn().mockResolvedValue({ data: {}, error: null }),
+          remove: vi.fn().mockResolvedValue({ data: {}, error: null }),
+        };
+      },
+    },
+    functions: {
+      invoke: vi.fn().mockResolvedValue({ data: {}, error: null }),
     },
   };
 

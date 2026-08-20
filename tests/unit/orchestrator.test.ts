@@ -2,17 +2,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { handleIncomingMessage } from '@/lib/ai/orchestrator';
 
 // Mock dependencies
-const mockSupabase = vi.hoisted(() => ({
-  supabase: {
-    from: vi.fn().mockReturnThis(),
-    insert: vi.fn().mockReturnThis(),
-    select: vi.fn().mockReturnThis(),
+const mockSupabase = vi.hoisted(() => {
+  const chainable = {
+    from: vi.fn(),
+    insert: vi.fn(),
+    select: vi.fn(),
     single: vi.fn(),
-    eq: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnThis(),
-  },
-}));
+    eq: vi.fn(),
+    limit: vi.fn(),
+  };
+  Object.values(chainable).forEach((fn) => fn.mockReturnValue(chainable));
+  return { supabase: chainable };
+});
 vi.mock('@/lib/supabase', () => mockSupabase);
+vi.mock('@/lib/supabase/admin', () => ({
+  supabaseAdmin: mockSupabase.supabase,
+}));
 
 const mockProvider = vi.hoisted(() => ({
   getProvider: vi.fn(),
@@ -37,6 +42,7 @@ vi.mock('@/lib/services/messageService', () => mockMessageService);
 
 const mockConversationService = vi.hoisted(() => ({
   updateConversationState: vi.fn(),
+  getConversationById: vi.fn(),
 }));
 vi.mock('@/lib/services/conversationService', () => mockConversationService);
 
@@ -74,12 +80,12 @@ describe('AI Orchestrator RAG Pipeline', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Re-set chainable return values after clearAllMocks
+    Object.values(mockSupabase.supabase).forEach((fn) => fn.mockReturnValue(mockSupabase.supabase));
     mockProvider.getProvider.mockReturnValue(mockAiProvider);
-    mockSupabase.supabase.from('messages').insert.mockReturnThis();
-    mockSupabase.supabase.from('messages').select.mockReturnThis();
     mockSupabase.supabase.from('messages').single.mockResolvedValue({ data: { id: 'msg-1' }, error: null });
     mockSupabase.supabase.from('clinic_ai_settings').select().eq().limit().single.mockResolvedValue({ data: { assistant_name: 'TestBot' }, error: null });
-    mockIntelligence.analyzeAndPersistMessage.mockResolvedValue({ intent: 'services_inquiry', shouldHandoff: false } as any);
+    mockIntelligence.analyzeAndPersistMessage.mockResolvedValue({ intent: 'services_inquiry', shouldHandoff: false, state: 'ai' } as any);
     mockMessageService.getConversationHistory.mockResolvedValue([]);
   });
 
@@ -95,8 +101,6 @@ describe('AI Orchestrator RAG Pipeline', () => {
     mockPromptManager.buildPrompt.mockReturnValue(finalPrompt);
     mockAiProvider.generate.mockResolvedValue(aiResponse);
     mockCostService.calculateCost.mockReturnValue(0.0002);
-    mockSupabase.supabase.from('ai_usage').insert.mockResolvedValue({ error: null });
-    mockSupabase.supabase.from('ai_events').insert.mockResolvedValue({ error: null });
 
     await handleIncomingMessage({
       clinicId: 'clinic-1',
@@ -108,12 +112,21 @@ describe('AI Orchestrator RAG Pipeline', () => {
     expect(mockMessageService.getConversationHistory).toHaveBeenCalledWith('conv-1', 10);
     expect(mockContextRetrieval.retrieveContext).toHaveBeenCalledWith('clinic-1', userQuery, 5);
 
-    // 2. Verify prompt was built with history and context
+    // 2. Verify prompt was built with history, context, and enhanced options
     expect(mockPromptManager.buildPrompt).toHaveBeenCalledWith(
       expect.any(Object), // settings
       userQuery,
       [], // history
-      retrievedContext
+      retrievedContext,
+      undefined, // citations (legacy array path)
+      expect.objectContaining({
+        confidenceThreshold: expect.any(Number),
+        safetyRules: expect.any(Array),
+        answerBoundaries: expect.any(Array),
+        handoffConditions: expect.any(Array),
+        intent: 'services_inquiry',
+        conversationState: 'ai',
+      })
     );
 
     // 3. Verify AI provider was called with the final RAG prompt
@@ -147,8 +160,6 @@ describe('AI Orchestrator RAG Pipeline', () => {
     mockContextRetrieval.retrieveContext.mockResolvedValue(noContext);
     mockPromptManager.buildPrompt.mockReturnValue(fallbackPrompt);
     mockAiProvider.generate.mockResolvedValue(aiResponse);
-    mockSupabase.supabase.from('ai_usage').insert.mockResolvedValue({ error: null });
-    mockSupabase.supabase.from('ai_events').insert.mockResolvedValue({ error: null });
 
     await handleIncomingMessage({
       clinicId: 'clinic-1',
@@ -159,12 +170,21 @@ describe('AI Orchestrator RAG Pipeline', () => {
     // Verify context retrieval was attempted
     expect(mockContextRetrieval.retrieveContext).toHaveBeenCalledWith('clinic-1', userQuery, 5);
 
-    // Verify prompt was built with an empty context array
+    // Verify prompt was built with an empty context array and enhanced options
     expect(mockPromptManager.buildPrompt).toHaveBeenCalledWith(
       expect.any(Object),
       userQuery,
       [], // history
-      noContext
+      noContext,
+      undefined, // citations (legacy array path)
+      expect.objectContaining({
+        confidenceThreshold: expect.any(Number),
+        safetyRules: expect.any(Array),
+        answerBoundaries: expect.any(Array),
+        handoffConditions: expect.any(Array),
+        intent: 'services_inquiry',
+        conversationState: 'ai',
+      })
     );
 
     // Verify AI provider was called with the fallback prompt
@@ -195,7 +215,7 @@ describe('AI Orchestrator RAG Pipeline', () => {
     expect(result).toBeNull();
 
     // 2. Verify handoff actions were taken
-    expect(mockConversationService.updateConversationState).toHaveBeenCalledWith('conv-1', 'awaiting_staff');
+    expect(mockConversationService.updateConversationState).toHaveBeenCalledWith('conv-1', 'awaiting_staff', 'clinic-1');
     expect(mockNotificationService.notifyStaffForHandoff).toHaveBeenCalledWith('clinic-1', 'conv-1');
     expect(mockLogging.logEvent).toHaveBeenCalledWith('ai_handoff_triggered', expect.any(Object));
   });

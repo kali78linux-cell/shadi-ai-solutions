@@ -3,7 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 
 function normalizeSlug(value: string) {
   return value
@@ -20,15 +20,36 @@ export default function RegisterPage() {
   const [clinicSlug, setClinicSlug] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState('');
+
+  function humanizeError(message: string): string {
+    if (!message) return 'حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.';
+    if (message.includes('User already registered')) {
+      return 'هذا البريد الإلكتروني مسجل بالفعل. يرجى تسجيل الدخول.';
+    }
+    if (message.includes('Password should be at least')) {
+      return 'كلمة المرور يجب أن تكون 6 أحرف على الأقل.';
+    }
+    if (message.includes('fetch') || message.includes('Failed to fetch') || message.includes('Network')) {
+      return 'تعذر الاتصال بخدمة التسجيل. تحقق من اتصالك بالإنترنت ثم أعد المحاولة.';
+    }
+    return message;
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
     setMessage('');
     setIsSubmitting(true);
+
+    if (password !== confirmPassword) {
+      setError('كلمتا المرور غير متطابقتين.');
+      setIsSubmitting(false);
+      return;
+    }
 
     const slug = normalizeSlug(clinicSlug || clinicName);
     if (!slug) {
@@ -37,58 +58,57 @@ export default function RegisterPage() {
       return;
     }
 
-    if (!isSupabaseConfigured) {
-      setError('ميزة التسجيل غير متاحة في وضع العرض التجريبي المحلي.');
+    try {
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+
+      if (signUpError) {
+        setError(humanizeError(signUpError.message));
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (!data?.user?.id) {
+        setError('لم يتم إنشاء حساب المستخدم. يرجى المحاولة مرة أخرى.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const token = data?.session?.access_token;
+      if (!token) {
+        setError('تم إنشاء الحساب. يرجى تأكيد بريدك الإلكتروني ثم تسجيل الدخول.');
+        setIsSubmitting(false);
+        return;
+      }
+
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          clinic_name: clinicName,
+          clinic_slug: slug,
+        }),
+      });
+
+      const result = await response.json();
       setIsSubmitting(false);
-      return;
-    }
 
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-    });
+      if (!response.ok) {
+        setError(result.error || 'حدث خطأ أثناء إنشاء العيادة.');
+        return;
+      }
 
-    if (signUpError) {
-      setError(signUpError.message);
+      setMessage('تم إنشاء العيادة والمستخدم بنجاح. سيتم تحويلك إلى لوحة التحكم...');
+      router.replace('/dashboard');
+    } catch (caught) {
+      setError('تعذر الاتصال بخدمة التسجيل. تحقق من اتصالك بالإنترنت ثم أعد المحاولة.');
       setIsSubmitting(false);
-      return;
     }
-
-    if (!data?.user?.id) {
-      setError('لم يتم إنشاء حساب المستخدم. يرجى المحاولة مرة أخرى.');
-      setIsSubmitting(false);
-      return;
-    }
-
-    const token = data?.session?.access_token;
-    if (!token) {
-      setError('تعذر الحصول على جلسة المستخدم بعد التسجيل. يرجى تسجيل الدخول.');
-      setIsSubmitting(false);
-      return;
-    }
-
-    const response = await fetch('/api/auth/register', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        clinic_name: clinicName,
-        clinic_slug: slug,
-      }),
-    });
-
-    const result = await response.json();
-    setIsSubmitting(false);
-
-    if (!response.ok) {
-      setError(result.error || 'حدث خطأ أثناء إنشاء العيادة.');
-      return;
-    }
-
-    setMessage('تم إنشاء العيادة والمستخدم بنجاح. سيتم تحويلك إلى لوحة التحكم...');
-    router.replace('/dashboard');
   }
 
   return (
@@ -152,6 +172,23 @@ export default function RegisterPage() {
               className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
               placeholder="••••••••"
               required
+              minLength={6}
+            />
+          </div>
+
+          <div>
+            <label htmlFor="confirmPassword" className="block text-sm font-medium text-slate-200">
+              تأكيد كلمة المرور
+            </label>
+            <input
+              id="confirmPassword"
+              type="password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              className="mt-2 w-full rounded-3xl border border-slate-800 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
+              placeholder="••••••••"
+              required
+              minLength={6}
             />
           </div>
 

@@ -3,6 +3,8 @@ import { supabase } from '@/lib/supabase';
 import { logEvent } from '@/lib/server/logging';
 import { authorizeClinicRequest } from '@/lib/services/clinicAuthorization';
 import { createConversation, getConversationById, listConversationsForClinic, updateConversationStatus } from '@/lib/services/conversationService';
+import { getSupabaseEnvConfig } from '@/lib/config';
+import { createDemoConversation, getDemoConversations } from '@/lib/demoState';
 
 async function getUserFromToken(req: Request) {
   const auth = req.headers.get('authorization') || '';
@@ -18,6 +20,12 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { clinic_id, patient_id, session_id, metadata } = body;
     if (!clinic_id) return NextResponse.json({ error: 'clinic_id is required' }, { status: 400 });
+
+    const config = getSupabaseEnvConfig();
+    if (!config.isConfigured) {
+      const conv = createDemoConversation({ clinic_id, patient_id, session_id, metadata });
+      return NextResponse.json({ data: conv }, { status: 201 });
+    }
 
     const user = await getUserFromToken(req);
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -39,17 +47,22 @@ export async function GET(req: Request) {
     const id = url.searchParams.get('id');
     const clinicId = url.searchParams.get('clinic_id');
 
-    const user = await getUserFromToken(req);
-    if (!user) {
-      logEvent('authentication_failure', { route: 'ai_conversations_get', reason: 'missing_user' }, 'warn');
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const config = getSupabaseEnvConfig();
+    if (!config.isConfigured) {
+      if (id) {
+        const conv = getDemoConversations().find((item) => item.id === id);
+        return NextResponse.json({ data: conv ?? null });
+      }
+      if (clinicId) {
+        return NextResponse.json({ data: getDemoConversations().filter((item) => item.clinic_id === clinicId) });
+      }
     }
 
     if (id) {
       const conv = await getConversationById(id);
       const authorization = await authorizeClinicRequest(req, conv.clinic_id);
       if (!authorization.authorized) {
-        logEvent('authorization_denied', { route: 'ai_conversations_get', clinic_id: conv.clinic_id, user_id: user.id, reason: authorization.status === 401 ? 'unauthorized' : 'forbidden' }, 'warn');
+        logEvent('authorization_denied', { route: 'ai_conversations_get', clinic_id: conv.clinic_id, reason: authorization.status === 401 ? 'unauthorized' : 'forbidden' }, 'warn');
         return NextResponse.json({ error: authorization.status === 401 ? 'Unauthorized' : 'Forbidden' }, { status: authorization.status });
       }
       return NextResponse.json({ data: conv });
@@ -57,7 +70,7 @@ export async function GET(req: Request) {
     if (clinicId) {
       const authorization = await authorizeClinicRequest(req, clinicId);
       if (!authorization.authorized) {
-        logEvent('authorization_denied', { route: 'ai_conversations_get', clinic_id: clinicId, user_id: user.id, reason: authorization.status === 401 ? 'unauthorized' : 'forbidden' }, 'warn');
+        logEvent('authorization_denied', { route: 'ai_conversations_get', clinic_id: clinicId, reason: authorization.status === 401 ? 'unauthorized' : 'forbidden' }, 'warn');
         return NextResponse.json({ error: authorization.status === 401 ? 'Unauthorized' : 'Forbidden' }, { status: authorization.status });
       }
       const list = await listConversationsForClinic(clinicId);
@@ -75,6 +88,11 @@ export async function PATCH(req: Request) {
     const { id, status } = body;
     if (!id || !status) return NextResponse.json({ error: 'id and status required' }, { status: 400 });
     if (!['open', 'awaiting_human', 'closed'].includes(status)) return NextResponse.json({ error: 'invalid status' }, { status: 400 });
+
+    const config = getSupabaseEnvConfig();
+    if (!config.isConfigured) {
+      return NextResponse.json({ data: { id, status } });
+    }
 
     const user = await getUserFromToken(req);
     if (!user) {

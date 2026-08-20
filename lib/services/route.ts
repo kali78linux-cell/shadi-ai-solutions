@@ -1,9 +1,26 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { createRouteHandlerClient } from '@supabase/ssr';
+import { createServerClient } from '@supabase/ssr';
 import { z } from 'zod';
 import * as patientService from '@/lib/services/patientService';
-import { Database } from '@/lib/database.types';
+
+const createRouteHandlerClient = (cookieStore: any) => createServerClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  {
+    cookies: {
+      get(name: string) {
+        return cookieStore.get(name)?.value;
+      },
+      set(name: string, value: string, options: any) {
+        cookieStore.set({ name, value, ...options });
+      },
+      remove(name: string, options: any) {
+        cookieStore.set({ name, value: '', ...options });
+      },
+    },
+  }
+);
 
 // Helper to authorize and get clinic context
 async function authorizeAndGetClinic(supabase: ReturnType<typeof createRouteHandlerClient>) {
@@ -38,7 +55,7 @@ const createPatientSchema = z.object({
 
 export async function GET(req: Request) {
   const cookieStore = cookies();
-  const supabase = createRouteHandlerClient<Database>(cookieStore);
+  const supabase = createRouteHandlerClient(cookieStore) as any;
   
   try {
     const { clinicId, error: authError } = await authorizeAndGetClinic(supabase);
@@ -59,7 +76,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   const cookieStore = cookies();
-  const supabase = createRouteHandlerClient<Database>(cookieStore);
+  const supabase = createRouteHandlerClient(cookieStore) as any;
 
   try {
     const { clinicId, error: authError } = await authorizeAndGetClinic(supabase);

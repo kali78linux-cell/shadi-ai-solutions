@@ -50,7 +50,7 @@ describe('WebChannel and WebSocketServer Integration', () => {
             const message = JSON.parse(data.toString());
             expect(message).toEqual(outgoingMessage);
             client.close();
-            server.wss.close();
+            server.close();
             done(null);
         });
     }));

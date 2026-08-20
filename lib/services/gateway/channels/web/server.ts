@@ -1,12 +1,12 @@
 
-import WebSocket from 'ws';
+import WebSocket, { WebSocketServer as WSServer } from 'ws';
 import { WebChannel } from '.';
 
 export class WebSocketServer {
-  private wss: WebSocket.Server;
+  private wss: WSServer;
 
   constructor(private port: number, private webChannel: WebChannel) {
-    this.wss = new WebSocket.Server({ port });
+    this.wss = new WSServer({ port });
     this.wss.on('connection', (ws: WebSocket) => {
       this.handleConnection(ws);
     });
@@ -28,6 +28,19 @@ export class WebSocketServer {
     this.wss.clients.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(JSON.stringify(message));
+      }
+    });
+  }
+
+  /**
+   * Closes the WebSocket server and all connected clients.
+   * Prevents resource leaks when the server is no longer needed (e.g. in tests).
+   */
+  close() {
+    this.wss.close();
+    this.wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.close();
       }
     });
   }

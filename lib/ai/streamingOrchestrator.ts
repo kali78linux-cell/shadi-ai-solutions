@@ -1,7 +1,6 @@
-import { OpenAIStream, StreamingTextResponse } from 'ai';
-import OpenAI from 'openai';
-import { supabase } from '@/lib/supabase';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 import { logEvent } from '@/lib/server/logging';
+import { getProvider } from './provider';
 import { retrieveContext } from './contextRetrieval';
 import { buildPrompt } from './promptManager';
 import { analyzeAndPersistMessage } from '@/lib/services/conversationIntelligence';
@@ -10,14 +9,9 @@ import { updateConversationState } from '@/lib/services/conversationService';
 import { notifyStaffForHandoff } from '@/lib/services/notificationService';
 import { calculateCost } from '@/lib/services/aiCostService';
 import { moderateUserPrompt, ContentFlaggedError } from './security';
-
-if (!process.env.OPENAI_API_KEY) {
-  console.warn('OPENAI_API_KEY is not set. Streaming will not work.');
-}
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+import { StreamingTextResponse } from './streamingResponse';
+import { detectLanguage } from '@/lib/services/knowledge/multilingual';
+import type { AssembledContext } from '@/lib/services/knowledge/contextAssembly';
 
 export async function streamAndRecordResponse(opts: {
   clinicId: string;
@@ -29,8 +23,16 @@ export async function streamAndRecordResponse(opts: {
 }) {
   const { clinicId, conversationId, sessionId, userId, text, modelPreference } = opts;
 
+  const provider = getProvider(modelPreference || undefined);
+  if (!provider) {
+    throw new Error('AI runtime is not configured. Please register an AI provider.');
+  }
+  if (!provider.stream) {
+    throw new Error(`AI provider "${provider.id}" does not support streaming. Use the non-streaming path.`);
+  }
+
   // --- Pre-flight checks (extracted from original orchestrator) ---
-  const { error: userMsgError } = await supabase.from('messages').insert([{
+  const { error: userMsgError } = await supabaseAdmin.from('messages').insert([{
     conversation_id: conversationId,
     clinic_id: clinicId,
     role: 'patient',
@@ -39,8 +41,8 @@ export async function streamAndRecordResponse(opts: {
   }]);
   if (userMsgError) throw userMsgError;
 
-  const { data: settingsData } = await supabase.from('clinic_ai_settings').select('*').eq('clinic_id', clinicId).limit(1).single();
-  const intelligence = await analyzeAndPersistMessage(supabase, {
+  const { data: settingsData } = await supabaseAdmin.from('clinic_ai_settings').select('*').eq('clinic_id', clinicId).limit(1).single();
+  const intelligence = await analyzeAndPersistMessage(supabaseAdmin, {
     clinicId,
     conversationId,
     text,
@@ -48,7 +50,7 @@ export async function streamAndRecordResponse(opts: {
   });
 
   if (intelligence.shouldHandoff) {
-    await updateConversationState(conversationId, 'awaiting_staff');
+    await updateConversationState(conversationId, 'awaiting_staff', clinicId);
     await notifyStaffForHandoff(clinicId, conversationId);
     logEvent('ai_handoff_triggered', { clinic_id: clinicId, conversation_id: conversationId, reason: intelligence.intent });
     return new Response(JSON.stringify({ message: 'Handoff triggered. An agent will be with you shortly.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -65,57 +67,145 @@ export async function streamAndRecordResponse(opts: {
   }
 
   const history = await getConversationHistory(conversationId, 10);
-  const context = await retrieveContext(clinicId, text, 5);
-  const prompt = buildPrompt(settingsData || null, text, history, context as any[]);
+  const retrieved = await retrieveContext(clinicId, text, 5);
+  // Normalize: handle both old-style (array) and new-style (AssembledContext) returns
+  const contextForPrompt = Array.isArray(retrieved)
+    ? retrieved
+    : (retrieved.chunks?.map((chunk) => chunk.result || {
+      id: chunk.citation.chunkId,
+      document_id: chunk.citation.documentId,
+      chunk_index: chunk.citation.chunkIndex,
+      content: chunk.content,
+      similarity: chunk.citation.confidenceScore,
+      confidenceScore: chunk.citation.confidenceScore,
+      type: 'unstructured' as const,
+    }) || []);
+  const configuredConfidenceThreshold = Number(settingsData?.confidence_threshold ?? 0.7);
+  const isAssembledContext = !Array.isArray(retrieved);
+  if (isAssembledContext) {
+    const assembled = retrieved as AssembledContext;
+    const maxConfidence = assembled.citations.reduce(
+      (maximum, citation) => Math.max(maximum, citation.confidenceScore),
+      0
+    );
+    if (!assembled.hasSufficientContext || assembled.hasConflictingContext || maxConfidence < configuredConfidenceThreshold) {
+      const unavailableResponse = detectLanguage(text) === 'ar'
+        ? 'عذرًا، لا تتوفر لدي معلومات موثوقة للإجابة عن هذا السؤال.'
+        : "I'm sorry, I don't have enough reliable information to answer that question.";
+      return new Response(unavailableResponse, { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+    }
+  }
+  const promptOptions = {
+    confidenceThreshold: configuredConfidenceThreshold,
+    clinicInfo: {
+      name: settingsData?.clinic_name,
+      address: settingsData?.clinic_address,
+      phone: settingsData?.clinic_phone,
+      website: settingsData?.clinic_website,
+    },
+    safetyRules: [
+      'Never provide a medical diagnosis.',
+      'Never prescribe medication or recommend specific dosages.',
+      'For any urgent or emergency concern, advise the patient to seek immediate professional care.',
+      'Do not guess or fabricate information not present in the provided context.',
+    ],
+    answerBoundaries: [
+      'Only answer using the provided context.',
+      'If the context does not contain the answer, state that you do not have that information.',
+      'Do not invent services, prices, or policies that are not in the context.',
+    ],
+    handoffConditions: [
+      'Hand off to a human agent if the patient requests emergency care.',
+      'Hand off to a human agent if the patient explicitly asks to speak with staff.',
+      'Hand off to a human agent if the patient expresses dissatisfaction or a complaint.',
+      'Hand off to a human agent if you are unsure how to answer accurately.',
+    ],
+    intent: intelligence.intent,
+    conversationState: intelligence.state,
+    patientContext: {
+      name: intelligence.appointment?.patientName,
+      phone: intelligence.appointment?.phone,
+      email: intelligence.appointment?.email,
+      requestedService: intelligence.appointment?.requestedService,
+      preferredDate: intelligence.appointment?.preferredDate,
+      preferredTime: intelligence.appointment?.preferredTime,
+    },
+  };
+
+  const prompt = isAssembledContext
+    ? buildPrompt(settingsData || null, text, history, contextForPrompt as any, (retrieved as AssembledContext).citations, promptOptions)
+    : buildPrompt(settingsData || null, text, history, contextForPrompt as any, undefined, promptOptions);
 
   // --- Streaming Implementation ---
   const start = Date.now();
-  const response = await openai.chat.completions.create({
-    model: modelPreference || 'gpt-4o',
-    stream: true,
-    messages: [{ role: 'user', content: prompt }],
+  const providerName = provider.id;
+  // Use the provider abstraction's stream() — supports OpenAI, Anthropic, Ollama.
+  const stream = await provider.stream({
+    prompt,
+    maxTokens: 1024,
+    temperature: 0.2,
   });
 
-  const stream = OpenAIStream(response, {
-    async onFinal(completion, data) {
-      // This callback runs after the stream is fully sent to the client.
-      // This is where we perform the "fire-and-forget" finalization logic.
-      const took = Date.now() - start;
-      const model = modelPreference || 'gpt-4o';
-      
-      // Use accurate token counts from the provider if available
-      const usage = data?.usage;
-      const promptTokens = usage?.prompt_tokens ?? 0;
-      const completionTokens = usage?.completion_tokens ?? 0;
-      const totalTokens = usage?.total_tokens ?? 0;
+  const streamWithRecord = new ReadableStream({
+    async start(controller) {
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+      const encoder = new TextEncoder();
+      let completion = '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const textChunk = decoder.decode(value, { stream: true });
+          completion += textChunk;
+          controller.enqueue(encoder.encode(textChunk));
+        }
+        controller.close();
+      } catch (err) {
+        controller.error(err);
+      } finally {
+        // Fire-and-forget finalization — do not block the stream close.
+        const took = Date.now() - start;
+        const model = modelPreference || undefined;
+        const promptTokens = 0;
+        const completionTokens = 0;
+        const totalTokens = 0;
 
-      // Persist the complete assistant message
-      await supabase.from('messages').insert([{
-        conversation_id: conversationId,
-        clinic_id: clinicId,
-        role: 'assistant',
-        content: completion,
-        prompt_tokens: promptTokens,
-        completion_tokens: completionTokens,
-        model: model,
-        response_time_ms: took,
-        metadata: { provider: 'openai', intelligence, streaming: true },
-      }]);
+        try {
+          await supabaseAdmin.from('messages').insert([{
+            conversation_id: conversationId,
+            clinic_id: clinicId,
+            role: 'assistant',
+            content: completion,
+            prompt_tokens: promptTokens,
+            completion_tokens: completionTokens,
+            model: model,
+            response_time_ms: took,
+            metadata: {
+              provider: providerName,
+              intelligence,
+              streaming: true,
+              has_sufficient_context: true,
+            },
+          }]);
 
-      // Track usage and cost
-      const estimatedCost = calculateCost(model, promptTokens, completionTokens);
-      await supabase.from('ai_usage').insert([{
-        clinic_id: clinicId,
-        model: model,
-        prompt_tokens: promptTokens,
-        completion_tokens: completionTokens,
-        total_tokens: totalTokens, // Corrected column name
-        estimated_cost: estimatedCost,
-      }]);
+          const estimatedCost = calculateCost(model || providerName, promptTokens, completionTokens);
+          await supabaseAdmin.from('ai_usage').insert([{
+            clinic_id: clinicId,
+            model: model || providerName,
+            prompt_tokens: promptTokens,
+            completion_tokens: completionTokens,
+            total_tokens: totalTokens,
+            estimated_cost: estimatedCost,
+          }]);
 
-      logEvent('ai_request_completed', { clinic_id: clinicId, conversation_id: conversationId, provider: 'openai', took_ms: took, tokens: totalTokens, streaming: true });
+          logEvent('ai_request_completed', { clinic_id: clinicId, conversation_id: conversationId, provider: providerName, took_ms: took, tokens: totalTokens, streaming: true });
+        } catch (err) {
+          console.error('[StreamingOrchestrator] onFinal error:', err);
+        }
+      }
     },
   });
 
-  return new StreamingTextResponse(stream);
+  return new StreamingTextResponse(streamWithRecord);
 }

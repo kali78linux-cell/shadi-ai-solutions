@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import DashboardAuthGuard from '@/components/auth/DashboardAuthGuard';
 import DashboardHeader from '@/components/auth/DashboardHeader';
+import ClinicSwitcher from '@/components/dashboard/ClinicSwitcher';
 import { isSupabaseConfigured } from '@/lib/supabase';
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
@@ -26,6 +27,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               <p className="mt-1 text-sm text-slate-400">إدارة المواعيد، دردشة AI، وقاعدة المعرفة في مكان واحد.</p>
             </div>
             <div className="flex flex-wrap items-center gap-3">
+              <ClinicSwitcher />
               <Link href="/dashboard/overview" className="rounded-full border border-slate-700 bg-slate-950/80 px-4 py-2 text-sm text-slate-100 transition hover:border-cyan-500/70">
                 Home
               </Link>
@@ -50,6 +52,9 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
               <nav className="mt-6 space-y-3 text-sm text-slate-300">
                 <Link href="/dashboard/overview" className="block rounded-2xl border border-slate-800 bg-slate-950/80 px-4 py-3 transition hover:border-cyan-500/70 hover:text-white">
                   Dashboard Home
+                </Link>
+                <Link href="/dashboard/clinic-setup" className="block rounded-2xl border border-slate-800 bg-slate-950/80 px-4 py-3 transition hover:border-cyan-500/70 hover:text-white">
+                  Clinic Setup
                 </Link>
                 <Link href="/dashboard/patients" className="block rounded-2xl border border-slate-800 bg-slate-950/80 px-4 py-3 transition hover:border-cyan-500/70 hover:text-white">
                   Patients

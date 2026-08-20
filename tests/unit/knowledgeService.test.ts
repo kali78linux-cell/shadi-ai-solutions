@@ -14,21 +14,34 @@ const mockProvider = vi.hoisted(() => ({
 }));
 vi.mock('@/lib/ai/provider', () => mockProvider);
 
-// Mock Supabase client
+// Mock Supabase client — use mockReturnValue for reliable chaining
 const mockSupabase = {
   storage: {
-    from: vi.fn().mockReturnThis(),
+    from: vi.fn(),
     upload: vi.fn(),
     remove: vi.fn(),
-    functions: { invoke: vi.fn() },
   },
-  from: vi.fn().mockReturnThis(),
-  insert: vi.fn().mockReturnThis(),
-  select: vi.fn().mockReturnThis(),
+  from: vi.fn(),
+  insert: vi.fn(),
+  select: vi.fn(),
   single: vi.fn(),
-  update: vi.fn().mockReturnThis(),
-  eq: vi.fn().mockReturnThis(),
+  update: vi.fn(),
+  delete: vi.fn(),
+  eq: vi.fn(),
+  functions: { invoke: vi.fn() },
 };
+
+// Make storage.from return the storage object for chaining
+mockSupabase.storage.from.mockReturnValue(mockSupabase.storage);
+// Make all query builder methods return mockSupabase for chaining
+[
+  mockSupabase.from,
+  mockSupabase.insert,
+  mockSupabase.select,
+  mockSupabase.update,
+  mockSupabase.delete,
+  mockSupabase.eq,
+].forEach((fn) => fn.mockReturnValue(mockSupabase));
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: vi.fn(() => mockSupabase),
@@ -46,6 +59,17 @@ describe('KnowledgeService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Re-set chainable return values after clearAllMocks
+    mockSupabase.storage.from.mockReturnValue(mockSupabase.storage);
+    [
+      mockSupabase.from,
+      mockSupabase.insert,
+      mockSupabase.select,
+      mockSupabase.update,
+      mockSupabase.delete,
+      mockSupabase.eq,
+    ].forEach((fn) => fn.mockReturnValue(mockSupabase));
+
     const supabaseClient = createClient('http://mock.url', 'mock.key');
     knowledgeService = new KnowledgeService(supabaseClient as any);
     mockProvider.getProvider.mockReturnValue(mockEmbeddingProvider);
@@ -59,8 +83,6 @@ describe('KnowledgeService', () => {
     mockSupabase.storage.from('knowledge_documents').upload.mockResolvedValue({ data: {}, error: null });
 
     const mockDocumentRecord = { id: 'doc-id-123', clinic_id: clinicId, uploaded_by: userId, original_filename: 'test.txt', processing_status: 'pending' };
-    mockSupabase.from('clinic_knowledge_documents').insert.mockReturnThis();
-    mockSupabase.select.mockReturnThis();
     mockSupabase.single.mockResolvedValue({ data: mockDocumentRecord, error: null });
 
     const result = await knowledgeService.handleUpload({ file, clinicId, userId });
@@ -107,8 +129,6 @@ describe('KnowledgeService', () => {
 
     // Mock database insert to fail
     const dbError = { message: 'DB insert failed', code: '23505' };
-    mockSupabase.from('clinic_knowledge_documents').insert.mockReturnThis();
-    mockSupabase.select.mockReturnThis();
     mockSupabase.single.mockResolvedValue({ data: null, error: dbError });
 
     await expect(knowledgeService.handleUpload({ file, clinicId, userId }))
@@ -123,12 +143,11 @@ describe('KnowledgeService', () => {
     const clinicId = 'test-clinic-id';
     const storagePath = `${clinicId}/file.pdf`;
 
-    mockSupabase.from('clinic_knowledge_documents').select().eq().single.mockResolvedValue({
+    mockSupabase.single.mockResolvedValue({
       data: { id: documentId, clinic_id: clinicId, storage_path: storagePath },
       error: null,
     });
-    mockSupabase.from('clinic_ai_knowledge').delete().eq.mockResolvedValue({ error: null });
-    mockSupabase.from('clinic_knowledge_documents').update.mockResolvedValue({ error: null });
+    mockSupabase.delete.mockReturnValue(mockSupabase);
     mockSupabase.storage.from('knowledge_documents').remove.mockResolvedValue({ data: {}, error: null });
 
     await knowledgeService.deleteDocument(documentId, clinicId);
@@ -154,12 +173,12 @@ describe('KnowledgeService', () => {
     const storagePath = `${clinicId}/file.pdf`;
     const updatedDoc = { id: documentId, processing_status: 'pending' };
 
-    mockSupabase.from('clinic_knowledge_documents').select().eq().single.mockResolvedValue({
+    mockSupabase.single.mockResolvedValueOnce({
       data: { id: documentId, clinic_id: clinicId, storage_path: storagePath },
       error: null,
     });
-    mockSupabase.from('clinic_ai_knowledge').delete().eq.mockResolvedValue({ error: null });
-    mockSupabase.from('clinic_knowledge_documents').update().eq().select().single.mockResolvedValue({
+    mockSupabase.delete.mockReturnValue(mockSupabase);
+    mockSupabase.single.mockResolvedValueOnce({
       data: updatedDoc,
       error: null,
     });

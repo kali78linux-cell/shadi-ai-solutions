@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import DashboardSection from '@/components/dashboard/DashboardSection';
 import EmptyState from '@/components/dashboard/EmptyState';
 import Skeleton from '@/components/ui/Skeleton';
-import { isSupabaseConfigured } from '@/lib/supabase';
+import { useSupabaseConfig } from '@/lib/useSupabaseConfig';
 
 type AnalyticsPayload = {
   appointmentsToday?: number;
@@ -16,6 +16,7 @@ type AnalyticsPayload = {
 };
 
 export default function AnalyticsPage() {
+  const { isConfigured: isSupabaseConfigured } = useSupabaseConfig();
   const [data, setData] = useState<AnalyticsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

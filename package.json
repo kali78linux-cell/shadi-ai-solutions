@@ -8,7 +8,9 @@
     "test:knowledge": "node scripts/test-knowledge.mjs",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "node node_modules/eslint/bin/eslint.js .",
+    "demo:seed": "node scripts/demo-seed.mjs",
+    "demo:reset": "node scripts/demo-reset.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^7.100.0",

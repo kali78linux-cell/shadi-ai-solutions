@@ -1,5 +1,5 @@
 import { logEvent } from '@/lib/server/logging';
-import { supabase } from '@/lib/supabase';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getConversationById } from './conversationService';
 
 /**
@@ -15,12 +15,12 @@ export async function notifyStaffForHandoff(clinicId: string, conversationId: st
   const conversation = await getConversationById(conversationId);
 
   // Create a persistent notification record
-  const { error } = await supabase.from('notifications').insert({
+  const { error } = await supabaseAdmin.from('notifications').insert({
     clinic_id: clinicId,
     user_id: null, // For now, we don't know which specific staff to notify. This can be extended.
     patient_id: conversation.patient_id,
     channel: 'email', // Default channel for handoff, can be configurable
-    type: 'human_handoff',
+    type: 'system', // notification_type enum only allows appointment_reminder, billing, system
     payload: { conversation_id: conversationId, reason: 'human_handoff_requested' },
     status: 'pending', // Status for the notification delivery
   });

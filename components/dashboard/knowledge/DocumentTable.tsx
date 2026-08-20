@@ -1,13 +1,13 @@
 'use client';
 
-import type { Document } from './KnowledgeBaseManager';
+import type { ClinicKnowledgeDocument } from '@/types/db';
 import StatusPill from '@/components/dashboard/StatusPill';
-import { FileText, FileCode, FileJson, MoreVertical, Clock, CheckCircle, AlertTriangle, Loader } from 'lucide-react';
+import { FileText, FileCode, FileJson, MoreVertical } from 'lucide-react';
 import { format } from 'date-fns';
 import { arSA } from 'date-fns/locale';
 
 type DocumentTableProps = {
-  documents: Document[];
+  documents: ClinicKnowledgeDocument[];
 };
 
 const getFileIcon = (fileType: string) => {
@@ -19,7 +19,7 @@ const getFileIcon = (fileType: string) => {
   }
 };
 
-const getStatusPill = (status: Document['processing_status']) => {
+const getStatusPill = (status: ClinicKnowledgeDocument['processing_status']) => {
   switch (status) {
     case 'indexed':
       return <StatusPill tone="success">مفهرس</StatusPill>;
@@ -73,13 +73,13 @@ export function DocumentTable({ documents }: DocumentTableProps) {
                   <div className="flex-shrink-0">{getFileIcon(doc.file_type)}</div>
                   <div>
                     <div className="text-sm font-medium text-slate-900 dark:text-slate-50">{doc.original_filename}</div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400">رفع بواسطة: {doc.uploaded_by?.name || 'غير معروف'}</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">رفع بواسطة: {doc.uploaded_by || 'غير معروف'}</div>
                   </div>
                 </div>
               </td>
               <td className="px-6 py-4 whitespace-nowrap">{getStatusPill(doc.processing_status)}</td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 dark:text-slate-400">
-                {format(new Date(doc.uploaded_at), 'd MMMM yyyy', { locale: arSA })}
+                {format(new Date(doc.created_at), 'd MMMM yyyy', { locale: arSA })}
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 dark:text-slate-400">
                 <div>{formatBytes(doc.file_size)}</div>

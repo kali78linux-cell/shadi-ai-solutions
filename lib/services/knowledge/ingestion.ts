@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { supabaseAdmin } from '@/lib/supabase/admin';
 import { logEvent } from '@/lib/server/logging';
 import { parseFileBuffer } from './parser';
 import { embedText } from './embeddings';
@@ -9,7 +9,7 @@ export type KnowledgeTestDeps = {
 };
 
 export async function ingestDocumentBuffer(clinicId: string, buffer: Buffer, filename?: string, uploadedBy?: string | null, metadata?: Record<string, any>, deps?: KnowledgeTestDeps) {
-  const client = deps?.supabaseClient ?? supabase;
+  const client = deps?.supabaseClient ?? supabaseAdmin;
   const embedFn = deps?.embedTextFn ?? embedText;
 
   // validate size
@@ -40,7 +40,7 @@ export async function ingestDocumentBuffer(clinicId: string, buffer: Buffer, fil
 }
 
 export async function ingestStructured(clinicId: string, subtype: string, items: Array<Record<string, any>>, uploadedBy?: string | null, deps?: KnowledgeTestDeps) {
-  const client = deps?.supabaseClient ?? supabase;
+  const client = deps?.supabaseClient ?? supabaseAdmin;
   const embedFn = deps?.embedTextFn ?? embedText;
 
   const rows: any[] = [];

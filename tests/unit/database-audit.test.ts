@@ -12,13 +12,26 @@ const migrationFiles = fs.readdirSync(migrationDir)
 describe('database migration audit', () => {
   it('keeps the migration sequence ordered by phase', () => {
     expect(migrationFiles).toEqual([
+      '20260721_initial_schema.sql',
       '20260722_ai_core_schema.sql',
       '20260722_production_schema.sql',
+      '20260723000001_communication_gateway.sql',
+      '20260723000002_conversation_intelligence.sql',
       '20260723_appointment_engine.sql',
-      '20260723_communication_gateway.sql',
-      '20260723_conversation_intelligence.sql',
+      '20260724_communication_gateway.sql',
       '20260725_knowledge_documents.sql',
       '20260726_vector_search.sql',
+      '20260727_usage_tracking_enhancements.sql',
+      '20260728_conversation_intelligence.sql',
+      '20260729_schema_reconciliation.sql',
+      '20260809_booking_service_catalog.sql',
+      '20260810_booking_confirmation_tokens.sql',
+      '20260811_booking_communications.sql',
+      '20260812_clinic_communication_settings.sql',
+      '20260813_provider_schedule_assignment.sql',
+      '20260814_booking_race_condition_fix.sql',
+      '20260815_notification_templates_and_reminder_config.sql',
+      '20260816_fix_recursive_rls.sql',
     ]);
   });
 

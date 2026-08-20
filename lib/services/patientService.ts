@@ -1,12 +1,23 @@
 import { SupabaseClient } from '@supabase/supabase-js';
-import { Database } from '@/types/db';
 
-type Patient = Database['public']['Tables']['patients']['Row'];
-type PatientInsert = Database['public']['Tables']['patients']['Insert'];
-type PatientUpdate = Database['public']['Tables']['patients']['Update'];
+type Patient = {
+  id: string;
+  clinic_id: string;
+  full_name?: string | null;
+  phone_number?: string | null;
+  email?: string | null;
+  date_of_birth?: string | null;
+  metadata?: Record<string, unknown> | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  deleted_at?: string | null;
+};
+
+type PatientInsert = Partial<Patient> & { clinic_id: string; full_name?: string | null; phone_number?: string | null; email?: string | null; date_of_birth?: string | null; metadata?: Record<string, unknown> | null; };
+type PatientUpdate = Partial<Patient>;
 
 export async function getPatients(
-  supabase: SupabaseClient<Database>,
+  supabase: SupabaseClient<any>,
   { clinicId, searchQuery }: { clinicId: string; searchQuery?: string | null }
 ) {
   let query = supabase
@@ -32,7 +43,7 @@ export async function getPatients(
 }
 
 export async function getPatientById(
-  supabase: SupabaseClient<Database>,
+  supabase: SupabaseClient<any>,
   { patientId, clinicId }: { patientId: string; clinicId: string }
 ): Promise<Patient | null> {
   const { data, error } = await supabase
@@ -51,7 +62,7 @@ export async function getPatientById(
 }
 
 export async function createPatient(
-  supabase: SupabaseClient<Database>,
+  supabase: SupabaseClient<any>,
   patientData: Omit<PatientInsert, 'id' | 'created_at' | 'clinic_id'>,
   clinicId: string
 ): Promise<Patient> {
@@ -70,7 +81,7 @@ export async function createPatient(
 }
 
 export async function updatePatient(
-  supabase: SupabaseClient<Database>,
+  supabase: SupabaseClient<any>,
   { patientId, clinicId, updateData }: { patientId: string; clinicId: string; updateData: PatientUpdate }
 ): Promise<Patient> {
   const { data, error } = await supabase
@@ -90,7 +101,7 @@ export async function updatePatient(
 }
 
 export async function deletePatient(
-  supabase: SupabaseClient<Database>,
+  supabase: SupabaseClient<any>,
   { patientId, clinicId }: { patientId: string; clinicId: string }
 ) {
   const { error } = await supabase

@@ -12,7 +12,7 @@ function formatBytes(bytes: number, decimals = 2) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
-export function StatCards({ documents }: { documents: ClinicKnowledgeDocument[] }) {
+export function StatCards({ documents, isLoading }: { documents: ClinicKnowledgeDocument[]; isLoading?: boolean }) {
   const stats = useMemo(() => {
     const total = documents.length;
     const indexed = documents.filter(d => d.processing_status === 'indexed').length;
@@ -32,6 +32,10 @@ export function StatCards({ documents }: { documents: ClinicKnowledgeDocument[] 
     { label: 'Total Chunks', value: stats.totalChunks },
     { label: 'Total Storage', value: formatBytes(stats.totalSize) },
   ];
+
+  if (isLoading) {
+    return null;
+  }
 
   return (
     <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">

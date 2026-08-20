@@ -2,20 +2,24 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getClinicUsageSummary } from '../../lib/services/usageService';
 
 // Mock dependencies
-const mockSupabase = vi.hoisted(() => ({
-  supabase: {
-    from: vi.fn().mockReturnThis(),
-    select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    gte: vi.fn().mockReturnThis(),
-    lte: vi.fn().mockReturnThis(),
-  },
-}));
+const mockSupabase = vi.hoisted(() => {
+  const chainable = {
+    from: vi.fn(),
+    select: vi.fn(),
+    eq: vi.fn(),
+    gte: vi.fn(),
+    lte: vi.fn(),
+  };
+  Object.values(chainable).forEach((fn) => fn.mockReturnValue(chainable));
+  return { supabase: chainable };
+});
 vi.mock('@/lib/supabase', () => mockSupabase);
 
 describe('Usage Service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Re-set chainable return values after clearAllMocks
+    Object.values(mockSupabase.supabase).forEach((fn) => fn.mockReturnValue(mockSupabase.supabase));
   });
 
   it('should correctly aggregate usage data for a clinic', async () => {
@@ -23,16 +27,16 @@ describe('Usage Service', () => {
     const from = '2024-01-01T00:00:00Z';
     const to = '2024-01-31T23:59:59Z';
 
-    // Mock message count
-    mockSupabase.supabase.from('messages').select.mockResolvedValue({ count: 150, error: null } as any);
+    // Mock message count — set on terminal method (lte) to preserve chain
+    mockSupabase.supabase.lte.mockResolvedValueOnce({ count: 150, error: null } as any);
 
-    // Mock usage data
+    // Mock usage data — set on terminal method (lte) to preserve chain
     const mockUsageData = [
       { total_tokens: 10000, estimated_cost: 0.1 },
       { total_tokens: 25000, estimated_cost: 0.25 },
       { total_tokens: 5000, estimated_cost: 0.05 },
     ];
-    mockSupabase.supabase.from('ai_usage').select.mockResolvedValue({ data: mockUsageData, error: null });
+    mockSupabase.supabase.lte.mockResolvedValueOnce({ data: mockUsageData, error: null });
 
     const summary = await getClinicUsageSummary(clinicId, from, to);
 
@@ -50,12 +54,12 @@ describe('Usage Service', () => {
     expect(mockSupabase.supabase.from('ai_usage').lte).toHaveBeenCalledWith('created_at', to);
 
     // Verify aggregated results
-    expect(summary).toEqual({
+    expect(summary).toEqual(expect.objectContaining({
       clinicId: clinicId,
       dateRange: { from, to },
       totalMessages: 150,
       totalTokens: 40000,
-      totalEstimatedCost: 0.4,
-    });
+    }));
+    expect(summary.totalEstimatedCost).toBeCloseTo(0.4, 5);
   });
 });

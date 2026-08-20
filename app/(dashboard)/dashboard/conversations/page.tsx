@@ -5,7 +5,7 @@ import DashboardSection from '@/components/dashboard/DashboardSection';
 import StatusPill from '@/components/dashboard/StatusPill';
 import EmptyState from '@/components/dashboard/EmptyState';
 import Skeleton from '@/components/ui/Skeleton';
-import { isSupabaseConfigured } from '@/lib/supabase';
+import { useClinicContext } from '@/lib/useClinicContext';
 
 type ConversationRecord = {
   id: string;
@@ -15,53 +15,45 @@ type ConversationRecord = {
 };
 
 export default function ConversationsPage() {
+  const { clinicId, authHeaders, loading: clinicLoading, error: clinicError } = useClinicContext();
   const [conversations, setConversations] = useState<ConversationRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
 
+  async function loadConversations(id: string) {
+    setLoading(true);
+    setError(null);
+    try {
+      const headers = await authHeaders();
+      const response = await fetch(`/api/ai/conversations?clinic_id=${encodeURIComponent(id)}`, { headers });
+      if (!response.ok) throw new Error('Conversation API unavailable');
+      const payload = await response.json();
+      setConversations(Array.isArray(payload?.data) ? payload.data : []);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : 'Unknown error');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
-    if (!isSupabaseConfigured) {
+    if (clinicLoading) {
+      setLoading(true);
+      return;
+    }
+    if (!clinicId) {
+      if (clinicError) setError(clinicError);
       setLoading(false);
       return;
     }
-
-    let isMounted = true;
-
-    async function loadConversations() {
-      setLoading(true);
-      setError(null);
-
-      try {
-        const response = await fetch('/api/ai/conversations?clinic_id=00000000-0000-0000-0000-000000000000');
-        if (!response.ok) {
-          throw new Error('Conversation API unavailable');
-        }
-        const payload = await response.json();
-        if (isMounted) {
-          setConversations(Array.isArray(payload?.data) ? payload.data : []);
-        }
-      } catch (caughtError) {
-        if (isMounted) {
-          setError(caughtError instanceof Error ? caughtError.message : 'Unknown error');
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
-      }
-    }
-
-    loadConversations();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+    void loadConversations(clinicId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clinicLoading, clinicId]);
 
   const filteredConversations = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return conversations;
-
     return conversations.filter((conversation) => [conversation.patient_id ?? '', conversation.session_id ?? '', conversation.status ?? ''].some((value) => value.toLowerCase().includes(normalized)));
   }, [conversations, query]);
 
@@ -83,15 +75,13 @@ export default function ConversationsPage() {
           <Skeleton className="h-24" />
           <Skeleton className="h-24" />
         </div>
-      ) : !isSupabaseConfigured ? (
-        <EmptyState title="Supabase is not configured" description="Connect the clinic environment to load live conversation activity from the backend." />
       ) : error ? (
         <EmptyState title="Conversation service unavailable" description={error} />
       ) : filteredConversations.length === 0 ? (
         <EmptyState title="No conversations available" description="Messages will appear here as patients interact with the AI receptionist." />
       ) : (
         <div className="space-y-4">
-          {filteredConversations.slice(0, 5).map((conversation) => (
+          {filteredConversations.slice(0, 10).map((conversation) => (
             <div key={conversation.id} className="rounded-[1.5rem] border border-slate-800 bg-slate-950/70 p-5">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>

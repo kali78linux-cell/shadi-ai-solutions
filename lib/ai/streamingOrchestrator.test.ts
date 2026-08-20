@@ -1,38 +1,43 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { streamAndRecordResponse } from '@/lib/ai/streamingOrchestrator';
-import { StreamingTextResponse } from 'ai';
+import { StreamingTextResponse } from '@/lib/ai/streamingResponse';
+
+const mockAdminClient = vi.hoisted(() => ({
+  from: vi.fn().mockReturnThis(),
+  insert: vi.fn().mockResolvedValue({ error: null }),
+  select: vi.fn().mockReturnThis(),
+  eq: vi.fn().mockReturnThis(),
+  limit: vi.fn().mockReturnThis(),
+  single: vi.fn(),
+}));
 
 // Mock dependencies
 const mockSupabase = vi.hoisted(() => ({
-  supabase: {
-    from: vi.fn().mockReturnThis(),
-    insert: vi.fn().mockResolvedValue({ error: null }),
-    select: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnThis(),
-    single: vi.fn(),
-  },
+  supabase: mockAdminClient,
 }));
 vi.mock('@/lib/supabase', () => mockSupabase);
+vi.mock('@/lib/supabase/admin', () => ({
+  supabaseAdmin: mockAdminClient,
+}));
 
-const mockOpenAI = vi.hoisted(() => {
-  const mockStream = {
-    [Symbol.asyncIterator]: async function* () {
-      yield { choices: [{ delta: { content: 'Hello' } }] };
-      yield { choices: [{ delta: { content: ' world' } }] };
+// Mock the provider abstraction so streamAndRecordResponse uses our fake provider
+const mockProvider = vi.hoisted(() => {
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode('Hello'));
+      controller.enqueue(new TextEncoder().encode(' world'));
+      controller.close();
     },
-  };
+  });
   return {
-    default: vi.fn().mockImplementation(() => ({
-      chat: {
-        completions: {
-          create: vi.fn().mockResolvedValue(mockStream),
-        },
-      },
-    })),
+    getProvider: vi.fn().mockReturnValue({
+      id: 'mock-provider',
+      stream: vi.fn().mockResolvedValue(stream),
+    }),
+    registerProvider: vi.fn(),
   };
 });
-vi.mock('openai', () => mockOpenAI);
+vi.mock('@/lib/ai/provider', () => mockProvider);
 
 const mockIntelligence = vi.hoisted(() => ({ analyzeAndPersistMessage: vi.fn() }));
 vi.mock('@/lib/services/conversationIntelligence', () => mockIntelligence);
@@ -52,6 +57,17 @@ vi.mock('@/lib/ai/contextRetrieval', () => mockContextRetrieval);
 const mockPromptManager = vi.hoisted(() => ({ buildPrompt: vi.fn() }));
 vi.mock('@/lib/ai/promptManager', () => mockPromptManager);
 
+const mockSecurity = vi.hoisted(() => ({
+  moderateUserPrompt: vi.fn().mockResolvedValue(undefined),
+  ContentFlaggedError: class ContentFlaggedError extends Error {},
+}));
+vi.mock('@/lib/ai/security', () => mockSecurity);
+
+const mockLogging = vi.hoisted(() => ({ logEvent: vi.fn() }));
+vi.mock('@/lib/server/logging', () => mockLogging);
+
+const mockCostService = vi.hoisted(() => ({ calculateCost: vi.fn(() => 0) }));
+vi.mock('@/lib/services/aiCostService', () => mockCostService);
 
 describe('Streaming AI Orchestrator', () => {
   beforeEach(() => {
@@ -102,7 +118,7 @@ describe('Streaming AI Orchestrator', () => {
     expect(body.message).toContain('Handoff triggered');
 
     // Verify handoff actions were called
-    expect(mockConversationService.updateConversationState).toHaveBeenCalledWith('conv-1', 'awaiting_staff');
+    expect(mockConversationService.updateConversationState).toHaveBeenCalledWith('conv-1', 'awaiting_staff', 'clinic-1');
     expect(mockNotificationService.notifyStaffForHandoff).toHaveBeenCalledWith('clinic-1', 'conv-1');
   });
 });

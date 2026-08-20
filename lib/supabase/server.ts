@@ -24,3 +24,16 @@ export function createSupabaseServerClient() {
     }
   );
 }
+
+export const supabaseServer = new Proxy({} as object, {
+  get(_target, prop) {
+    const client = createSupabaseServerClient() as unknown as Record<string, unknown>;
+    const value = client[prop as string];
+
+    if (typeof value === 'function') {
+      return value.bind(client);
+    }
+
+    return value;
+  },
+});
