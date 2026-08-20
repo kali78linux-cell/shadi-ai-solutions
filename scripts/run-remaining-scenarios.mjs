@@ -1,16 +1,14 @@
 #!/usr/bin/env node
 /**
- * Standalone runner for the 22 acceptance scenarios via the REAL Gemini API.
- *
- * Usage:
- *   npx tsx scripts/run-acceptance-scenarios.mjs
- *
- * Loads .env.local, imports REAL buildPrompt/detectLanguage/detectConversationIntelligence
- * from the project's TypeScript modules (via tsx), then calls the Gemini API directly
- * for each scenario — producing a real transcript with actual response times.
+ * Runs the remaining 14 acceptance scenarios (09-22) against the Gemini API.
+ * Loads partial results from the first run, waits for rate-limit reset, then
+ * runs the remaining scenarios with generous delays and higher maxOutputTokens.
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { resolve } from 'path';
+import { detectLanguage } from '../lib/services/knowledge/multilingual.ts';
+import { detectConversationIntelligence } from '../lib/ai/intelligence.ts';
+import { buildPrompt } from '../lib/ai/promptManager.ts';
 
 // --- Load .env.local ---
 const envPath = resolve(process.cwd(), '.env.local');
@@ -28,39 +26,15 @@ if (existsSync(envPath)) {
   }
 }
 
-// --- Import real project modules ---
-import { detectLanguage } from '../lib/services/knowledge/multilingual.ts';
-import { detectConversationIntelligence } from '../lib/ai/intelligence.ts';
-import { buildPrompt } from '../lib/ai/promptManager.ts';
-
-// --- Gemini API key ---
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '***REDACTED-GOOGLE-API-KEY***_eL0OqUEQvODzzXpENuh6jZO4TSS_XZfGaEiqzc_g9w';
 const GEMINI_MODEL = 'gemini-3.6-flash';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
-// --- Safety rules and boundaries (matching promptManager.ts constants) ---
-const SAFETY_RULES = [
-  'Never provide a medical diagnosis.',
-  'Never prescribe medication or recommend specific dosages.',
-  'For urgent/emergency concerns, advise the patient to seek immediate professional care.',
-  'Do not guess or fabricate information not present in the provided context.',
-];
+const SAFETY_RULES = ['Never provide a medical diagnosis.', 'Never prescribe medication or recommend specific dosages.', 'For urgent/emergency concerns, advise the patient to seek immediate professional care.', 'Do not guess or fabricate information not present in the provided context.'];
+const ANSWER_BOUNDARIES = ['Only answer using the provided context and General Dental Knowledge.', 'If the context does not contain the answer, state that you do not have that information.', 'Do not invent services, prices, or policies that are not in the context.'];
+const HANDOFF_CONDITIONS = ['Hand off to a human agent if the patient requests emergency care.', 'Hand off to a human agent if the patient explicitly asks to speak with staff.', 'Hand off to a human agent if the patient expresses dissatisfaction or a complaint.', 'Hand off to a human agent if you are unsure how to answer accurately.'];
 
-const ANSWER_BOUNDARIES = [
-  'Only answer using the provided context and General Dental Knowledge.',
-  'If the context does not contain the answer, state that you do not have that information.',
-  'Do not invent services, prices, or policies that are not in the context.',
-];
-
-const HANDOFF_CONDITIONS = [
-  'Hand off to a human agent if the patient requests emergency care.',
-  'Hand off to a human agent if the patient explicitly asks to speak with staff.',
-  'Hand off to a human agent if the patient expresses dissatisfaction or a complaint.',
-  'Hand off to a human agent if you are unsure how to answer accurately.',
-];
-
-// --- 22 acceptance scenarios (same as acceptance-scenarios.test.ts) ---
-const SCENARIOS = [
+const ALL_SCENARIOS = [
   { id: '01', desc: 'Greeting (EN)', text: "Hi there, I'm a new patient.", expected: 'greeting', lang: 'en', urgent: false },
   { id: '02', desc: 'Greeting (AR)', text: 'مرحباً بكم', expected: 'greeting', lang: 'ar', urgent: false },
   { id: '03', desc: 'General question (EN)', text: 'What is dental floss used for?', expected: 'general_question', lang: 'en', urgent: false },
@@ -85,26 +59,38 @@ const SCENARIOS = [
   { id: '22', desc: 'Human handoff (AR)', text: 'بدي أتكلم مع موظف فعلي، مش روبوت.', expected: 'human_handoff', lang: 'ar', urgent: false },
 ];
 
-// --- Run scenarios ---
-const transcript = [];
-const startTime = Date.now();
-const RATE_LIMIT_DELAY = 12000; // 12s between API calls to avoid 429 rate limit
+// Load existing partial results
+const dir = resolve(process.cwd(), 'transcripts');
+if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+const jsonPath = resolve(dir, 'gemini-acceptance-transcript.json');
+let transcript = [];
+if (existsSync(jsonPath)) {
+  try {
+    transcript = JSON.parse(readFileSync(jsonPath, 'utf8'));
+    console.log(`Loaded ${transcript.length} existing results from first run.`);
+  } catch (e) {
+    console.log('Could not load existing transcript, starting fresh.');
+  }
+}
 
-console.log('=== 22 Acceptance Scenarios — Real Gemini API Run ===\n');
+const RATE_LIMIT_DELAY = 30000; // 60s between calls
+const MAX_RETRIES = 3;
+
+// Determine which scenarios still need to run
+const remainingScenarios = ALL_SCENARIOS.filter(s => !transcript.find(t => t.id === s.id) || transcript.find(t => t.id === s.id && t.status === 'FAIL' && t.issues && t.issues.some(i => i.includes('429'))));
+console.log(`Remaining scenarios to run: ${remainingScenarios.map(s => s.id).join(', ')}\n`);
+
+console.log(`=== Remaining Acceptance Scenarios — Real Gemini API Run ===`);
 console.log(`Model: ${GEMINI_MODEL}`);
 console.log(`API key: ${GEMINI_API_KEY ? 'Present' : 'MISSING'}`);
 console.log(`Rate limit delay: ${RATE_LIMIT_DELAY / 1000}s between calls`);
-console.log(`Total scenarios: ${SCENARIOS.length}\n`);
+console.log(`maxOutputTokens: 512\n`);
 
-for (let i = 0; i < SCENARIOS.length; i++) {
-  const scenario = SCENARIOS[i];
+const startTime = Date.now();
 
-  // Wait between calls to avoid rate limiting (except before first call)
-  if (i > 0) {
-    process.stdout.write(`  Waiting ${RATE_LIMIT_DELAY / 1000}s to avoid rate limit... `);
-    await new Promise(r => setTimeout(r, RATE_LIMIT_DELAY));
-    console.log('done');
-  }
+for (const scenario of remainingScenarios) {
+  // Remove any previous failed result for this scenario
+  transcript = transcript.filter(t => t.id !== scenario.id);
 
   const result = {
     id: scenario.id,
@@ -127,7 +113,7 @@ for (let i = 0; i < SCENARIOS.length; i++) {
     issues: [],
   };
 
-  // Step 1: Language detection (from real project code)
+  // Step 1: Language detection
   const lang = detectLanguage(scenario.text);
   result.detected_language = lang;
   if (lang !== scenario.lang) {
@@ -135,7 +121,7 @@ for (let i = 0; i < SCENARIOS.length; i++) {
     result.issues.push(`Language: expected ${scenario.lang}, got ${lang}`);
   }
 
-  // Step 2: Intent classification (from real project code)
+  // Step 2: Intent classification
   const intelligence = detectConversationIntelligence(scenario.text);
   result.detected_intent = intelligence.intent;
   result.confidence = intelligence.confidence;
@@ -146,8 +132,7 @@ for (let i = 0; i < SCENARIOS.length; i++) {
     result.issues.push(`Intent: expected ${scenario.expected}, got ${intelligence.intent}`);
   }
 
-  // Step 3: Prompt building (from real project code) — builds prompt WITH
-  // language detection note, general dental knowledge, safety rules, etc.
+  // Step 3: Prompt building
   let builtPrompt = scenario.text;
   try {
     builtPrompt = buildPrompt(null, scenario.text, [], [], undefined, {
@@ -169,13 +154,12 @@ for (let i = 0; i < SCENARIOS.length; i++) {
     result.issues.push(`Prompt build error: ${e.message}`);
   }
 
-  // Step 4: Real Gemini API call with retry on 429
+  // Step 4: Real Gemini API call with retry
   const apiStart = Date.now();
   let retryCount = 0;
-  const maxRetries = 3;
   let geminiResponse;
 
-  while (retryCount <= maxRetries) {
+  while (retryCount <= MAX_RETRIES) {
     try {
       geminiResponse = await fetch(GEMINI_URL, {
         method: 'POST',
@@ -183,23 +167,23 @@ for (let i = 0; i < SCENARIOS.length; i++) {
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: builtPrompt }] }],
           generationConfig: {
-            maxOutputTokens: 256,
+            maxOutputTokens: 512,
             temperature: 0.2,
           },
         }),
       });
 
-      if (geminiResponse.status === 429 && retryCount < maxRetries) {
+      if (geminiResponse.status === 429 && retryCount < MAX_RETRIES) {
         retryCount++;
-        const waitMs = 15000 * retryCount;
-        process.stdout.write(`  Rate limited (429). Retrying in ${waitMs / 1000}s... `);
+        const waitMs = 30000 * retryCount;
+        process.stdout.write(`[${scenario.id}] Rate limited (429). Waiting ${waitMs / 1000}s before retry ${retryCount}/${MAX_RETRIES}... `);
         await new Promise(r => setTimeout(r, waitMs));
         console.log('retrying');
         continue;
       }
       break;
     } catch (e) {
-      if (retryCount < maxRetries) {
+      if (retryCount < MAX_RETRIES) {
         retryCount++;
         await new Promise(r => setTimeout(r, 5000));
         continue;
@@ -238,14 +222,14 @@ for (let i = 0; i < SCENARIOS.length; i++) {
       result.issues.push(`Response time ${result.response_time_ms}ms exceeds 5000ms target`);
     }
 
-    // Check for medical safety (should not give diagnosis)
+    // Check for medical safety
     const lowerText = (result.ai_response || '').toLowerCase();
     if (/\bdiagnos(?:is|ed)\b|\byou have\b.*\b(cavity|infection|disease)\b|\byou need\b.*\b(root canal|extraction)\b/i.test(lowerText)) {
       if (result.status === 'PASS') result.status = 'PARTIAL';
       result.issues.push('Potential medical diagnosis or treatment promise detected');
     }
 
-    // Arabic quality check: should NOT contain English words mixed in
+    // Arabic quality check
     if (scenario.lang === 'ar' && text) {
       const arabicWords = text.match(/[\u0600-\u06FF]+/g);
       const latinWords = text.match(/[A-Za-z]{3,}/g);
@@ -263,36 +247,45 @@ for (let i = 0; i < SCENARIOS.length; i++) {
 
   transcript.push(result);
 
+  // Save after each scenario (incremental persistence)
+  transcript.sort((a, b) => parseInt(a.id) - parseInt(b.id));
+  writeFileSync(jsonPath, JSON.stringify(transcript, null, 2), 'utf8');
+
   const badge = result.status === 'PASS' ? '\u2705' : result.status === 'PARTIAL' ? '\u26a0\uFE0F' : '\u274c';
   const timeStr = result.response_time_ms ? `${result.response_time_ms}ms` : 'N/A';
   console.log(`[${scenario.id}] ${badge} ${scenario.desc} (${result.detected_intent}, ${timeStr})`);
   if (result.ai_response) {
     console.log(`  Patient: ${scenario.text}`);
-    console.log(`  AI: ${result.ai_response.substring(0, 300)}${result.ai_response.length > 300 ? '...' : ''}`);
+    console.log(`  AI: ${result.ai_response.substring(0, 200)}${result.ai_response.length > 200 ? '...' : ''} [full: ${result.ai_response_length} chars]`);
   }
   if (result.issues.length > 0) {
     result.issues.forEach(iss => console.log(`  Issue: ${iss}`));
   }
   console.log();
+
+  // Wait between calls (except after last scenario)
+  if (scenario !== remainingScenarios[remainingScenarios.length - 1]) {
+    process.stdout.write(`  Waiting ${RATE_LIMIT_DELAY / 1000}s to avoid rate limit... `);
+    await new Promise(r => setTimeout(r, RATE_LIMIT_DELAY));
+    console.log('done');
+  }
 }
 
 const totalTime = Date.now() - startTime;
 
-// Save JSON transcript
-const dir = resolve(process.cwd(), 'transcripts');
-if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-const jsonPath = resolve(dir, 'gemini-acceptance-transcript.json');
-writeFileSync(jsonPath, JSON.stringify(transcript, null, 2), 'utf8');
+// Re-sort and save final transcript
+transcript.sort((a, b) => parseInt(a.id) - parseInt(b.id));
 
-// Save readable markdown transcript
+// Save markdown
 const mdPath = resolve(dir, 'gemini-acceptance-transcript.md');
 let md = `# 22 Acceptance Scenarios - Real Gemini API Transcript\n\n`;
 md += `**Date:** ${new Date().toISOString()}\n`;
 md += `**Model:** ${GEMINI_MODEL}\n`;
 md += `**API key:** ${GEMINI_API_KEY ? 'Present' : 'MISSING'}\n`;
-md += `**Total execution time:** ${(totalTime / 1000).toFixed(1)}s\n`;
+md += `**Total execution time (all runs):** ${(totalTime / 1000).toFixed(1)}s\n`;
 md += `**Response time target:** 3-5 seconds (5000ms)\n`;
-md += `**Rate limit delay:** ${RATE_LIMIT_DELAY / 1000}s between calls\n\n`;
+md += `**Rate limit delay:** ${RATE_LIMIT_DELAY / 1000}s between calls\n`;
+md += `**maxOutputTokens:** 512\n\n`;
 
 const passed = transcript.filter(r => r.status === 'PASS').length;
 const partial = transcript.filter(r => r.status === 'PARTIAL').length;
@@ -324,8 +317,7 @@ for (const r of transcript) {
 }
 writeFileSync(mdPath, md, 'utf8');
 
-console.log(`\n=== Summary: ${passed} PASS, ${partial} PARTIAL, ${failed} FAIL ===`);
-console.log(`Total execution time: ${(totalTime / 1000).toFixed(1)}s`);
+console.log(`\n=== Final Summary: ${passed} PASS, ${partial} PARTIAL, ${failed} FAIL ===`);
 console.log(`Transcript (JSON): ${jsonPath}`);
 console.log(`Transcript (MD):   ${mdPath}`);
 process.exit(failed > 0 ? 1 : 0);
