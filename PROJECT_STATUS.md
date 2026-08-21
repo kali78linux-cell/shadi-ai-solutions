@@ -148,3 +148,52 @@ A full Next.js landing page (`app/page.tsx` → `components/landing/`) matching 
 - `app/api/landing/founding-slots/route.ts` (new)
 - `app/api/auth/register/route.ts` — founding-member logic (graceful fallback)
 - `package.json` / `package-lock.json` — added `framer-motion`
+
+---
+
+## Landing Page Production Readiness
+
+**Status: AUDITED — 2 production blockers found**
+
+### Verification matrix
+
+| Feature | Expected | Actual | Evidence | Status |
+|---|---|---|---|---|
+| Landing page renders | HTTP 200, all sections | HTTP 200, 56KB, all key sections present | `curl /` → 200; grep found AI-Receptions, كل مكالمة, احجز مكانك, الدكتورة حلا, عرض التأسيس | ✅ VERIFIED |
+| No console-breaking errors | No runtime errors | No 500s for `/`; "error" matches were Next.js error-boundary boilerplate | dev log: `GET / 200`; grep context showed `error-boundary.js`/`next-error-h1` | ✅ VERIFIED |
+| No hydration errors | No hydration mismatch | ⚠️ Not verifiable without browser | No browser automation available | ⚠️ NOT VERIFIED |
+| Responsive / RTL / mobile / desktop | Correct layout | ⚠️ Not verifiable without browser | No browser automation available | ⚠️ NOT VERIFIED |
+| Founding-slots endpoint | Never 5xx, safe fallback | Returns 200 `{remaining:100,total:100,migrated:false}` | `curl /api/landing/founding-slots` → 200 | ✅ VERIFIED |
+| Registration still works | 12/12 PASS | 12/12 PASS | `scripts/verify-registration-flow.mjs` | ✅ VERIFIED |
+| Lead form (clinic_id=null) | Valid lead accepted | ❌ RLS blocks public insert → 500 | `POST /api/leads` → `new row violates row-level security policy` | ❌ FAILED |
+| Lead form invalid input | Rejected cleanly | ❌ Also 500 (RLS) — no validation reached | `POST /api/leads {}` → 500 | ❌ FAILED |
+| Hero chat simulation | Deterministic, no API calls | Deterministic scripted loop, no fetch, no keys | `components/landing/Hero.tsx` — pure setTimeout state machine | ✅ VERIFIED |
+| No secrets in client bundle | No service-role key in frontend | Service-role only via `process.env`/`Deno.env.get`, never inlined | grep audit — all matches are env refs, values redacted | ✅ VERIFIED |
+| `.env.local` gitignored | Not committed | Gitignored | `git check-ignore .env.local` → confirmed | ✅ VERIFIED |
+
+### Founding-member system defensive audit
+
+- **If `is_founding_member` doesn't exist**: `/api/landing/founding-slots` catches any error and returns the safe fallback (200, `remaining=100`). ✅
+- **Does registration still work?** Yes — 12/12 PASS. The register route wraps the founding count in try/catch and falls back to a base insert if the column is missing. ✅
+- **Does `/api/landing/founding-slots` fail safely?** Yes — fixed to never 5xx (was 500 before the fix). ✅
+- **Does the landing page show a safe fallback?** Yes — UrgencyBar and Pricing default to `FOUNDING_SLOTS_TOTAL` (100) and only update on a successful fetch. ✅
+- **Can a failed founding-slot query break registration?** No — the register route's founding check is wrapped in try/catch; a failure just leaves `is_founding_member=false`. ✅
+- **Can a clinic receive founding status twice?** No — the flag is set once at insert time; there is no update path that re-grants it. ✅
+- **Is the count race-safe?** ⚠️ PARTIAL — the register route does count-then-insert (not atomic). Under concurrent registrations near the 100-slot boundary, two clinics could both pass the `< 100` check. Acceptable for the current single-instance architecture, but not atomic. ⚠️ NOT VERIFIED as production-safe at scale.
+
+### Production blockers
+
+**1. Must fix before launch**
+- ❌ **Lead form fails** — `POST /api/leads` with `clinic_id=null` is blocked by RLS (`new row violates row-level security policy`). The `createLead` service uses the anon/server client (RLS-enforced), but a public landing-page lead has no auth session and no clinic membership. Needs a server-side privileged insert path (e.g., service-role) or an RLS policy allowing anonymous `source='landing_page_founding_offer'` inserts with `clinic_id IS NULL`. This is the only functional blocker on the landing page.
+
+**2. Requires external credentials**
+- ⚠️ **Founding-member migration not applied** — `db/migrations/20260821_founding_member_clinics.sql` needs DDL access (SUPABASE_ACCESS_TOKEN or DB password). Until applied: counter shows 100 (fallback), clinics register as non-founding, and the lead `clinic_id=null` insert is blocked by the still-NOT-NULL column.
+
+**3. Future integration**
+- ⚠️ **Clinic advertisements** — static placeholder content; TODO to connect to `clinic_ads` table.
+- ⚠️ **Hero AI chat** — scripted simulation; replace with real Anthropic-connected chat component.
+- ⚠️ **Portfolio** — SVG/emoji tiles; replace with real photos when available.
+
+**4. Cosmetic improvements**
+- ⚠️ **Font loading** — dev log showed `fonts.gstatic.com` retries (network-dependent); fonts fall back gracefully to system fonts.
+- ⚠️ **Browser visual verification** — not performed (no browser automation); recommend a manual click-through of all sections, RTL, and mobile/desktop before launch.
