@@ -165,8 +165,10 @@ A full Next.js landing page (`app/page.tsx` → `components/landing/`) matching 
 | Responsive / RTL / mobile / desktop | Correct layout | ⚠️ Not verifiable without browser | No browser automation available | ⚠️ NOT VERIFIED |
 | Founding-slots endpoint | Never 5xx, safe fallback | Returns 200 `{remaining:100,total:100,migrated:false}` | `curl /api/landing/founding-slots` → 200 | ✅ VERIFIED |
 | Registration still works | 12/12 PASS | 12/12 PASS | `scripts/verify-registration-flow.mjs` | ✅ VERIFIED |
-| Lead form (clinic_id=null) | Valid lead accepted | ❌ RLS blocks public insert → 500 | `POST /api/leads` → `new row violates row-level security policy` | ❌ FAILED |
-| Lead form invalid input | Rejected cleanly | ❌ Also 500 (RLS) — no validation reached | `POST /api/leads {}` → 500 | ❌ FAILED |
+| Lead form (clinic_id=null) | Valid lead accepted | ⚠️ RLS fixed (service-role path), but insert blocked by `clinic_id NOT NULL` (migration not applied) → 500 | `POST /api/leads` → error 23502 `null value in column "clinic_id" violates not-null constraint` | ⚠️ PARTIAL |
+| Lead form invalid email | Rejected cleanly | 400 validation, not 500 | `POST /api/leads` bad email → 400 `A valid email is required` | ✅ VERIFIED |
+| Lead form missing field | Rejected cleanly | 400 validation, not 500 | `POST /api/leads` no name → 400 `Required` | ✅ VERIFIED |
+| Lead form malicious clinic_id | Rejected/ignored | clinic_id stripped by Zod, always forced NULL server-side | `POST /api/leads` with arbitrary clinic_id → schema ignores it | ✅ VERIFIED |
 | Hero chat simulation | Deterministic, no API calls | Deterministic scripted loop, no fetch, no keys | `components/landing/Hero.tsx` — pure setTimeout state machine | ✅ VERIFIED |
 | No secrets in client bundle | No service-role key in frontend | Service-role only via `process.env`/`Deno.env.get`, never inlined | grep audit — all matches are env refs, values redacted | ✅ VERIFIED |
 | `.env.local` gitignored | Not committed | Gitignored | `git check-ignore .env.local` → confirmed | ✅ VERIFIED |
@@ -184,7 +186,7 @@ A full Next.js landing page (`app/page.tsx` → `components/landing/`) matching 
 ### Production blockers
 
 **1. Must fix before launch**
-- ❌ **Lead form fails** — `POST /api/leads` with `clinic_id=null` is blocked by RLS (`new row violates row-level security policy`). The `createLead` service uses the anon/server client (RLS-enforced), but a public landing-page lead has no auth session and no clinic membership. Needs a server-side privileged insert path (e.g., service-role) or an RLS policy allowing anonymous `source='landing_page_founding_offer'` inserts with `clinic_id IS NULL`. This is the only functional blocker on the landing page.
+- ⚠️ **Lead form insert blocked by NOT NULL constraint** — The RLS blocker is **fixed** (a secure server-side service-role path `createPublicLead` now handles public landing leads, with strict Zod validation and `clinic_id` forced NULL). Validation tests pass (400 for bad email/missing field; malicious clinic_id ignored). However, the actual insert still returns 500 with error 23502 (`null value in column "clinic_id" violates not-null constraint`) because `leads.clinic_id` is still `NOT NULL` in the live DB — the founding-member migration (which makes it nullable) is not applied. **This resolves automatically once the migration is applied.** No RLS policy was opened; service-role stays server-only.
 
 **2. Requires external credentials**
 - ⚠️ **Founding-member migration not applied** — `db/migrations/20260821_founding_member_clinics.sql` needs DDL access (SUPABASE_ACCESS_TOKEN or DB password). Until applied: counter shows 100 (fallback), clinics register as non-founding, and the lead `clinic_id=null` insert is blocked by the still-NOT-NULL column.
