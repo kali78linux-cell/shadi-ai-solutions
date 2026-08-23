@@ -3,7 +3,6 @@
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { supabase } from '@/lib/supabase';
 
 function normalizeSlug(value: string) {
   return value
@@ -27,8 +26,11 @@ export default function RegisterPage() {
 
   function humanizeError(message: string): string {
     if (!message) return 'حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.';
-    if (message.includes('User already registered')) {
+    if (message.includes('already registered')) {
       return 'هذا البريد الإلكتروني مسجل بالفعل. يرجى تسجيل الدخول.';
+    }
+    if (message.includes('already taken')) {
+      return 'عنوان URL هذا مستخدم بالفعل. يرجى اختيار عنوان آخر.';
     }
     if (message.includes('Password should be at least')) {
       return 'كلمة المرور يجب أن تكون 6 أحرف على الأقل.';
@@ -59,37 +61,14 @@ export default function RegisterPage() {
     }
 
     try {
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-      });
-
-      if (signUpError) {
-        setError(humanizeError(signUpError.message));
-        setIsSubmitting(false);
-        return;
-      }
-
-      if (!data?.user?.id) {
-        setError('لم يتم إنشاء حساب المستخدم. يرجى المحاولة مرة أخرى.');
-        setIsSubmitting(false);
-        return;
-      }
-
-      const token = data?.session?.access_token;
-      if (!token) {
-        setError('تم إنشاء الحساب. يرجى تأكيد بريدك الإلكتروني ثم تسجيل الدخول.');
-        setIsSubmitting(false);
-        return;
-      }
-
+      // Server-side registration creates the confirmed auth user, clinic,
+      // and clinic_users owner membership atomically (with rollback).
       const response = await fetch('/api/auth/register', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          email,
+          password,
           clinic_name: clinicName,
           clinic_slug: slug,
         }),
@@ -99,12 +78,17 @@ export default function RegisterPage() {
       setIsSubmitting(false);
 
       if (!response.ok) {
-        setError(result.error || 'حدث خطأ أثناء إنشاء العيادة.');
+        setError(humanizeError(result.error || 'حدث خطأ أثناء إنشاء العيادة.'));
         return;
       }
 
-      setMessage('تم إنشاء العيادة والمستخدم بنجاح. سيتم تحويلك إلى لوحة التحكم...');
-      router.replace('/dashboard');
+      setMessage('تم إنشاء العيادة والمستخدم بنجاح. سيتم تحويلك إلى صفحة تسجيل الدخول...');
+
+      // Server created a confirmed auth user; redirect to login so the user
+      // signs in with a fresh, real session.
+      setTimeout(() => {
+        router.replace('/login?registered=1');
+      }, 1200);
     } catch (caught) {
       setError('تعذر الاتصال بخدمة التسجيل. تحقق من اتصالك بالإنترنت ثم أعد المحاولة.');
       setIsSubmitting(false);

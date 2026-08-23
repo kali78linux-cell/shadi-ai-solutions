@@ -32,6 +32,7 @@ const migrations = [
   'db/migrations/20260813_provider_schedule_assignment.sql',
   'db/migrations/20260815_notification_templates_and_reminder_config.sql',
   'db/migrations/20260816_fix_recursive_rls.sql',
+  'db/migrations/20260821_founding_member_clinics.sql',
 ];
 
 const apiBase = 'https://api.supabase.com/v1/projects';

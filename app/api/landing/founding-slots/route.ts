@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { FOUNDING_SLOTS_TOTAL } from '@/lib/landing/landing-copy';
 
+// Prevent Next.js App Router from caching this GET response as static.
+// Without this, the endpoint returns a stale cached value (e.g. remaining=100)
+// even after the DB count changes. This is a public counter and must always
+// reflect the live DB state.
+export const dynamic = 'force-dynamic';
+
 /**
  * GET /api/landing/founding-slots
  * Returns the number of founding-member places still available:
