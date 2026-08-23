@@ -181,15 +181,14 @@ A full Next.js landing page (`app/page.tsx` → `components/landing/`) matching 
 - **Does the landing page show a safe fallback?** Yes — UrgencyBar and Pricing default to `FOUNDING_SLOTS_TOTAL` (100) and only update on a successful fetch. ✅
 - **Can a failed founding-slot query break registration?** No — the register route's founding check is wrapped in try/catch; a failure just leaves `is_founding_member=false`. ✅
 - **Can a clinic receive founding status twice?** No — the flag is set once at insert time; there is no update path that re-grants it. ✅
-- **Is the count race-safe?** ⚠️ PARTIAL — the register route does count-then-insert (not atomic). Under concurrent registrations near the 100-slot boundary, two clinics could both pass the `< 100` check. Acceptable for the current single-instance architecture, but not atomic. ⚠️ NOT VERIFIED as production-safe at scale.
+- **Is the count race-safe?** ⚠️ KNOWN & ACCEPTED — the register route does count-then-insert (not atomic). Under concurrent registrations near the 100-slot boundary, two clinics could both pass the `< 100` check. This is a **known and accepted limitation at the current stage**; a complex fix (e.g. atomic counter or advisory lock) is intentionally deferred and not a priority for the current single-instance architecture.
 
 ### Production blockers
 
-**1. Must fix before launch**
-- ⚠️ **Lead form insert blocked by NOT NULL constraint** — The RLS blocker is **fixed** (a secure server-side service-role path `createPublicLead` now handles public landing leads, with strict Zod validation and `clinic_id` forced NULL). Validation tests pass (400 for bad email/missing field; malicious clinic_id ignored). However, the actual insert still returns 500 with error 23502 (`null value in column "clinic_id" violates not-null constraint`) because `leads.clinic_id` is still `NOT NULL` in the live DB — the founding-member migration (which makes it nullable) is not applied. **This resolves automatically once the migration is applied.** No RLS policy was opened; service-role stays server-only.
+- 🔧 **Lead form insert (clinic_id=null)** — The RLS blocker was **fixed** (a secure server-side service-role path `createPublicLead` handles public landing leads, with strict Zod validation and `clinic_id` forced NULL; validation returns 400 for bad email/missing field). During final cleanup the founding-member columns were **confirmed present** in the live DB. A live `clinic_id=null` insert was **NOT re-tested** during cleanup (to avoid creating a new lead); this remains the recommended pre-launch smoke test. No RLS policy was opened; service-role stays server-only.
 
-**2. Requires external credentials**
-- ⚠️ **Founding-member migration not applied** — `db/migrations/20260821_founding_member_clinics.sql` needs DDL access (SUPABASE_ACCESS_TOKEN or DB password). Until applied: counter shows 100 (fallback), clinics register as non-founding, and the lead `clinic_id=null` insert is blocked by the still-NOT-NULL column.
+**2. Supabase DDL access**
+- ✅ **Founding-member migration — VERIFIED APPLIED during cleanup.** The columns `clinics.is_founding_member` and `founding_price_locked_at` were confirmed present in the live DB (query returned values). The `/api/landing/founding-slots` counter now reflects the real remaining count (`100 - founding count`), currently **100** with no test artifacts.
 
 **3. Future integration**
 - ⚠️ **Clinic advertisements** — static placeholder content; TODO to connect to `clinic_ads` table.
@@ -199,3 +198,50 @@ A full Next.js landing page (`app/page.tsx` → `components/landing/`) matching 
 **4. Cosmetic improvements**
 - ⚠️ **Font loading** — dev log showed `fonts.gstatic.com` retries (network-dependent); fonts fall back gracefully to system fonts.
 - ⚠️ **Browser visual verification** — not performed (no browser automation); recommend a manual click-through of all sections, RTL, and mobile/desktop before launch.
+
+---
+
+## Final Cleanup & Verification
+
+**Status: COMPLETE** (2026-08-23)
+
+### Database cleanup — test data deleted only
+
+Verified against the live Supabase DB (read-only inspection first, then targeted deletes matched by
+exact identity). Deleted **test data only**; **live/demo seed data was preserved** (it is a project
+feature with its own `npm run demo:seed` / `demo:reset` lifecycle):
+
+- ❌ Deleted **`founding-test-20260822`** clinic (slug `founding-test-20260822`, `is_founding_member=true`),
+  its `clinic_users` owner membership, and its auth user `founding-test-20260822@example.com`.
+  This was a test clinic that had been incorrectly inflating the founding count to 1.
+- ❌ Deleted **`regtest-mt2dkd3z@gmail.com`** — diagnostic signup test user (unconfirmed, no clinic, no membership).
+- ❌ Deleted **2 landing test leads**: `lead-test@example.com` and `malicious-test@example.com` (both `clinic_id=NULL`, `source=landing_page_founding_offer`).
+
+**Preserved (not deleted):** `shadisuad78@gmail.com` (real account), `clinic-admin@demo.local` (demo
+admin), demo clinics `demo-clinic`, `smile-care-dental-center`, `bright-teeth-clinic`,
+`noura-dental-imaging`, `demo-dental-clinic` and their demo seed content (real project feature).
+
+### Database verification
+
+- ✅ Founding columns exist in the live DB (`clinics.is_founding_member`, `founding_price_locked_at`).
+- ✅ **Founding count = 0** → **remaining founding slots = 100** (all open), the correct clean state.
+- ✅ No orphaned test auth users, clinics, or landing test leads remain. Leading count reflects the 5
+  preserved demo leads only.
+
+### Test results (re-run during cleanup)
+
+- ✅ PASS — `tests/unit/api-hardening.test.ts` **5/5** (authorization gate rejects non-member clinic access).
+- ✅ PASS — `npm run build` (Next.js 14.2.35) completes; `/api/landing/founding-slots`, landing page,
+  and all routes compile (`.next` output produced). The only log lines are Next.js informational
+  "Dynamic server usage ... used request.url" notes for these API routes — expected; no build failure.
+- ⏸ **Full registration→login flow (12/12)** was verified in prior runs (recorded above). It was **NOT
+  RE-RUN** during this cleanup per the constraint that no new test registrations/bookings/leads be
+  created during cleanup; the register route is unchanged, so the 12/12 result stands as previously
+  verified and recorded.
+
+### Race condition note (unchanged, accepted)
+
+The founding-slot count race condition (count-then-insert, non-atomic) is a **known and accepted**
+limitation at the current stage. A complex fix (atomic counter or advisory lock) is intentionally
+deferred and not a priority for the current single-instance architecture. No further investigation
+or remediation is planned for this issue at this time.
