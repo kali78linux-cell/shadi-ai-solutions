@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { freshConversationState, conversationStorageKeysToPurge } from '@/lib/chat/conversationReset';
 import { applyPendingBookingContext, type PendingBookingContext, type BookingUiProjection } from '@/lib/ai/bookingContextBridge';
+import { validateBookingPhone } from '@/lib/booking/bookingPhone';
 
 type ChatMessage = {
   id?: string;
@@ -542,6 +543,10 @@ const clinicQueryField = isUuid ? 'clinic_id' : 'clinic_slug';
       if (!cid) throw new Error('Unable to resolve clinic for booking');
       if (!selectedProvider || !selectedSlot) throw new Error('Please select provider and time slot');
       if (!patientName) throw new Error('Please provide your name');
+      // FIX C: phone is REQUIRED by the booking API — reject client-side with a
+      // clear message before any POST (previously sent null → 400 Invalid booking request).
+      const validPhone = validateBookingPhone(patientPhone);
+      if (!validPhone) throw new Error('رقم الهاتف مطلوب لإتمام الحجز — يرجى إدخال رقم هاتف صحيح (٥ خانات على الأقل)');
 
       const [date, time] = selectedSlot.split('T')[0] ? [selectedSlot.split('T')[0], selectedSlot.split('T')[1].slice(0,5)] : [selectedDate ?? '', selectedSlot ?? ''];
 
@@ -554,7 +559,7 @@ const clinicQueryField = isUuid ? 'clinic_id' : 'clinic_slug';
         date: date,
         time: time,
         patient_name: patientName,
-        phone: patientPhone || null,
+        phone: validPhone,
         email: patientEmail || null,
       };
 
@@ -802,7 +807,7 @@ const clinicQueryField = isUuid ? 'clinic_id' : 'clinic_slug';
 
                   <div className="grid grid-cols-1 gap-2">
                     <input placeholder="الاسم *" value={patientName} onChange={(e) => { setPatientName(e.target.value); void persistUiToConversation({ patient_name: e.target.value }); }} className="mt-2 w-full rounded-md bg-slate-800 px-3 py-2 text-slate-100" />
-                    <input placeholder="الهاتف (اختياري)" value={patientPhone} onChange={(e) => { setPatientPhone(e.target.value); void persistUiToConversation({ phone: e.target.value }); }} className="w-full rounded-md bg-slate-800 px-3 py-2 text-slate-100" />
+                    <input placeholder="الهاتف (مطلوب لإتمام الحجز)" value={patientPhone} onChange={(e) => { setPatientPhone(e.target.value); void persistUiToConversation({ phone: e.target.value }); }} className="w-full rounded-md bg-slate-800 px-3 py-2 text-slate-100" />
                     <input placeholder="البريد الإلكتروني (اختياري)" value={patientEmail} onChange={(e) => { setPatientEmail(e.target.value); void persistUiToConversation({ email: e.target.value }); }} className="w-full rounded-md bg-slate-800 px-3 py-2 text-slate-100" />
                   </div>
 

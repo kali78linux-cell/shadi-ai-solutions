@@ -57,6 +57,52 @@ describe('reasonServiceProvider', () => {
     for (const call of calls) expect(call.filters).toContainEqual(['clinic_id', clinicId]);
   });
 
+
+  // FIX B regression (manual-user-test Finding B): pain/sensitivity needs that
+  // name NO specialty must fall back to the general exam — never the highest
+  // static service score (which ranked «أشعة أسنان» over a proper exam).
+  it('falls back to the general exam for unspecific pain needs instead of the top static score', async () => {
+    configureQueries({
+      services: [
+        { id: 'svc-xray', name: 'أشعة أسنان', description: null, active: true },
+        { id: 'svc-clean', name: 'تنظيف أسنان', description: null, active: true },
+        { id: 'svc-exam', name: 'فحص أسنان', description: null, active: true },
+      ],
+      providers: [{ id: 'prov-a', name: 'د. أ', title: 'Dentist' }],
+      assignments: [],
+    });
+
+    const result = await reasonServiceProvider(clinicId, {
+      ...EMPTY_PATIENT_CONTEXT,
+      requested_need: 'طاحونتي بتجعني لمن بشرب بارد',
+      problem: 'حساسية ووجع بالضرس',
+    });
+
+    expect(result.recommendedServiceId).toBe('svc-exam');
+  });
+
+  // FIX B regression: a specialty the need actually names still wins when the
+  // clinic offers it (normal recommendation path is preserved).
+  it('still recommends the specialty service when the need names it', async () => {
+    configureQueries({
+      services: [
+        { id: 'svc-xray', name: 'أشعة أسنان', description: null, active: true },
+        { id: 'svc-canal', name: 'علاج عصب', description: null, active: true },
+        { id: 'svc-exam', name: 'فحص أسنان', description: null, active: true },
+      ],
+      providers: [{ id: 'prov-a', name: 'د. أ', title: 'Dentist' }],
+      assignments: [],
+    });
+
+    const result = await reasonServiceProvider(clinicId, {
+      ...EMPTY_PATIENT_CONTEXT,
+      requested_need: 'بدي علاج عصب للضرس',
+      problem: null,
+    });
+
+    expect(result.recommendedServiceId).toBe('svc-canal');
+  });
+
   it('returns no recommendation when the clinic has no active services', async () => {
     configureQueries({ services: [], providers: [{ id: 'provider-a', name: 'د. أ', title: null }], assignments: [] });
 

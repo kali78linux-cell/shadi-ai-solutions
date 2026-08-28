@@ -126,6 +126,13 @@ export async function reasonServiceProvider(
   const need = `${context.requested_need ?? ''} ${context.problem ?? ''}`.trim();
   const needTerms = CLINICAL_TERMS.filter(([re]) => re.test(need));
 
+  // FIX B (manual-user-test Finding B): pain/sensitivity signals («طاحونتي
+  // بتجعني لمن بشرب بارد») name NO specialty. They must NEVER be answered by
+  // the highest static service score (that ranked «أشعة أسنان» above a proper
+  // exam). Pain/unspecific needs fall back to the general examination service.
+  // Need-side only — service scoring above is intentionally untouched.
+  const PAIN_UNSPECIFIC_RE = /ألم|يوجع|بتوجع|تجع|وجع|طاحون|ضرس|حساسية|حساس|ينزف|نزيف|مكسور|بارد|toothache|pain|hurts|sensitive|bleed|cold/i;
+
   // A specialty named by the patient but ABSENT from this clinic's services:
   // surfaced so the AI asks reception instead of inventing price/slots.
   let specialtyWithoutService: string | null = null;
@@ -134,11 +141,25 @@ export async function reasonServiceProvider(
     if (!served && !specialtyWithoutService) specialtyWithoutService = label;
   }
 
-  // If no specialty-specific service exists, prefer a general "فحص الأسنان"
-  // (examination) so the booking path can still continue safely.
-  let matchedService = rankedServices.length ? rankedServices[0].service : null;
+  const generalExam = services.find((s) => /فحص|exam|check/i.test(s.name)) ?? null;
+
+  // FIX B: the patient's NEED drives service selection — never a bare static
+  // top score. Priority: (1) highest-ranked service whose own text matches a
+  // specialty the need actually names, (2) the general examination service for
+  // pain/unspecific needs, (3) last resort: the top static score ONLY when the
+  // clinic publishes no فحص service at all (keeps the documented booking path
+  // alive for such clinics).
+  let matchedService: (typeof services)[number] | null = null;
+  if (needTerms.length) {
+    const needRanked = rankedServices.filter((r) =>
+      needTerms.some(([re]) => re.test((r.service.name + ' ' + (r.service.description ?? '')).toLowerCase()))
+    );
+    matchedService = needRanked.length ? needRanked[0].service : generalExam;
+  } else if (PAIN_UNSPECIFIC_RE.test(need)) {
+    matchedService = generalExam;
+  }
   if (!matchedService) {
-    matchedService = services.find((s) => /فحص|exam|check/i.test(s.name)) ?? services[0];
+    matchedService = generalExam ?? (rankedServices.length ? rankedServices[0].service : services[0]) ?? null;
   }
 
   // 2. Find providers assigned to this service
