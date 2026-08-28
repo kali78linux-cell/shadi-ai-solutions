@@ -122,4 +122,32 @@ describe('STEP 7 — booking conversation ⇄ UI bridging (pure)', () => {
     expect(ctx!.patient_confirmed_booking).toBe(true);
     expect(ctx!.missing).not.toContain('patient_name');
   });
+
+  // STEP 10C regression — emergency/handoff must never surface booking UI.
+  it('returns null for a staff-handoff conversation even when recommendations exist', () => {
+    // The stale metadata left by analyzeAndPersistMessage BEFORE the handoff
+    // (STEP 10B finding) must not project a pending booking.
+    const staleMeta = {
+      recommended_service_id: SVC,
+      recommended_provider_id: PROV,
+      state: 'RECOMMENDING_PROVIDER',
+      booking: { patient_name: 'أحمد' },
+    };
+    expect(buildPendingBookingContext(staleMeta, { conversationState: 'awaiting_staff' })).toBeNull();
+    expect(buildPendingBookingContext(staleMeta, { conversationState: 'assigned_staff' })).toBeNull();
+    // Message-level handoff signal also suppresses (defense in depth).
+    expect(buildPendingBookingContext({ ...staleMeta, handoff: true })).toBeNull();
+  });
+
+  it('keeps the normal recommendation flow unchanged (no handoff state)', () => {
+    const ctx = buildPendingBookingContext(
+      { recommended_service_id: SVC, recommended_provider_id: PROV },
+      { conversationState: 'ai' }
+    );
+    expect(ctx).not.toBeNull();
+    expect(ctx!.recommended_service_id).toBe(SVC);
+    expect(ctx!.recommended_provider_id).toBe(PROV);
+    // Legacy single-arg calls (ai state implied) are untouched.
+    expect(buildPendingBookingContext({ recommended_service_id: SVC })).not.toBeNull();
+  });
 });

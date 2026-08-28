@@ -40,9 +40,17 @@ export type PendingBookingContext = {
  * the UI stays quiet (no invented prefill).
  */
 export function buildPendingBookingContext(
-  meta: Record<string, unknown> | null | undefined
+  meta: Record<string, unknown> | null | undefined,
+  opts?: { conversationState?: string | null }
 ): PendingBookingContext | null {
   if (!meta) return null;
+  // STEP 10C: once the conversation is handed off to staff (emergency triage,
+  // low-confidence handoff, or AI-outage fallback) the pending-booking
+  // projection must stay quiet — a conversation awaiting a human must never
+  // surface booking prefill/recommendations in the UI.
+  const state = opts?.conversationState ?? null;
+  if (state === 'awaiting_staff' || state === 'assigned_staff') return null;
+  if (meta.handoff === true) return null;
   const booking = (meta.booking ?? {}) as Record<string, unknown>;
   const hasAnySignal = Boolean(
     meta.recommended_service_id || meta.recommended_provider_id || booking.slot
