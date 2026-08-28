@@ -6,7 +6,7 @@ import {
   computeEntityBoost,
 } from './entities';
 
-const MIN_SIMILARITY_THRESHOLD = 0.8;
+const MIN_SIMILARITY_THRESHOLD = 0.75;
 /** Lower bar for keyword-only results when vector search is unavailable
  *  (e.g. local Ollama without an embedding model). */
 const MIN_KEYWORD_THRESHOLD = 0.35;
