@@ -36,9 +36,10 @@ describe('GET /api/booking/services', () => {
 
     expect(res.status).toBe(200);
     expect(body.data.services).toEqual([
-      { id: 's1', name: 'Cleaning', description: 'Dental cleaning', duration_minutes: 30, price: 100 },
-      { id: 's2', name: 'Root Canal', description: null, duration_minutes: 60, price: 500 },
+      { id: 's1', name: 'Cleaning', description: 'Dental cleaning', duration_minutes: 30 },
+      { id: 's2', name: 'Root Canal', description: null, duration_minutes: 60 },
     ]);
+    expect(JSON.stringify(body.data.services)).not.toContain('price');
     expect(mockBookingService.getActiveServices).toHaveBeenCalledWith(CLINIC);
   });
 

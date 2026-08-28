@@ -42,6 +42,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: 'Upload successful, processing started.', document });
   } catch (error: any) {
     console.error('Upload error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: 'Upload failed. Check the file and try again.' }, { status: 500 });
   }
 }

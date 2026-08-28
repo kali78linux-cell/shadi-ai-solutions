@@ -3,8 +3,9 @@ import { supabase } from '@/lib/supabase';
 import { logEvent } from '@/lib/server/logging';
 import { authorizeClinicRequest } from '@/lib/services/clinicAuthorization';
 import { createConversation, getConversationById, listConversationsForClinic, updateConversationStatus } from '@/lib/services/conversationService';
+import { loadConversationSummaries, loadConversationDetailExtras } from '@/lib/services/conversationSummary';
 import { getSupabaseEnvConfig } from '@/lib/config';
-import { createDemoConversation, getDemoConversations } from '@/lib/demoState';
+import { createDemoConversation, getDemoConversations, demoFallbackAllowed } from '@/lib/demoState';
 
 async function getUserFromToken(req: Request) {
   const auth = req.headers.get('authorization') || '';
@@ -22,7 +23,7 @@ export async function POST(req: Request) {
     if (!clinic_id) return NextResponse.json({ error: 'clinic_id is required' }, { status: 400 });
 
     const config = getSupabaseEnvConfig();
-    if (!config.isConfigured) {
+    if (!config.isConfigured && demoFallbackAllowed()) {
       const conv = createDemoConversation({ clinic_id, patient_id, session_id, metadata });
       return NextResponse.json({ data: conv }, { status: 201 });
     }
@@ -48,7 +49,7 @@ export async function GET(req: Request) {
     const clinicId = url.searchParams.get('clinic_id');
 
     const config = getSupabaseEnvConfig();
-    if (!config.isConfigured) {
+    if (!config.isConfigured && demoFallbackAllowed()) {
       if (id) {
         const conv = getDemoConversations().find((item) => item.id === id);
         return NextResponse.json({ data: conv ?? null });
@@ -59,13 +60,32 @@ export async function GET(req: Request) {
     }
 
     if (id) {
-      const conv = await getConversationById(id);
+      let conv;
+      try {
+        conv = await getConversationById(id);
+      } catch {
+        return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
+      }
       const authorization = await authorizeClinicRequest(req, conv.clinic_id);
       if (!authorization.authorized) {
         logEvent('authorization_denied', { route: 'ai_conversations_get', clinic_id: conv.clinic_id, reason: authorization.status === 401 ? 'unauthorized' : 'forbidden' }, 'warn');
         return NextResponse.json({ error: authorization.status === 401 ? 'Unauthorized' : 'Forbidden' }, { status: authorization.status });
       }
-      return NextResponse.json({ data: conv });
+      // Detail payload: staff-readable summary + linked appointment + patient
+      // record. Extras are additive — a failure there must not break the core
+      // conversation fetch.
+      let summary = null;
+      let appointment = null;
+      let patient = null;
+      try {
+        const extras = await loadConversationDetailExtras(conv as any);
+        summary = extras.summary;
+        appointment = extras.appointment;
+        patient = extras.patient;
+      } catch (extrasError) {
+        logEvent('conversation_detail_extras_failed', { conversation_id: id, error: extrasError instanceof Error ? extrasError.message : String(extrasError) }, 'warn');
+      }
+      return NextResponse.json({ data: conv, summary, appointment, patient });
     }
     if (clinicId) {
       const authorization = await authorizeClinicRequest(req, clinicId);
@@ -74,7 +94,14 @@ export async function GET(req: Request) {
         return NextResponse.json({ error: authorization.status === 401 ? 'Unauthorized' : 'Forbidden' }, { status: authorization.status });
       }
       const list = await listConversationsForClinic(clinicId);
-      return NextResponse.json({ data: list });
+      // Staff-readable summaries instead of raw rows ("جلسة مريض" + session ids).
+      try {
+        const summaries = await loadConversationSummaries(list as any);
+        return NextResponse.json({ data: summaries });
+      } catch (summaryError) {
+        logEvent('conversation_summary_enrichment_failed', { clinic_id: clinicId, error: summaryError instanceof Error ? summaryError.message : String(summaryError) }, 'warn');
+        return NextResponse.json({ data: list });
+      }
     }
     return NextResponse.json({ error: 'id or clinic_id required' }, { status: 400 });
   } catch (err: any) {
@@ -90,7 +117,7 @@ export async function PATCH(req: Request) {
     if (!['open', 'awaiting_human', 'closed'].includes(status)) return NextResponse.json({ error: 'invalid status' }, { status: 400 });
 
     const config = getSupabaseEnvConfig();
-    if (!config.isConfigured) {
+    if (!config.isConfigured && demoFallbackAllowed()) {
       return NextResponse.json({ data: { id, status } });
     }
 

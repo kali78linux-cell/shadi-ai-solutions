@@ -32,6 +32,9 @@ describe('database migration audit', () => {
       '20260814_booking_race_condition_fix.sql',
       '20260815_notification_templates_and_reminder_config.sql',
       '20260816_fix_recursive_rls.sql',
+      '20260820_clinic_ads_table.sql',
+      '20260821_founding_member_clinics.sql',
+      '20260827_dashboard_location_roles_shifts.sql',
     ]);
   });
 

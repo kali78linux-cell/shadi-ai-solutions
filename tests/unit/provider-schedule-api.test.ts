@@ -1,18 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockAuth = vi.hoisted(() => ({ authorizeClinicRequest: vi.fn() }));
+const mockAuth = vi.hoisted(() => ({ authorizeClinicRequest: vi.fn(), roleDenied: vi.fn(() => null), ADMIN_ROLES: ['owner','manager'], DATA_ROLES: ['owner','manager','doctor','receptionist','staff'] }));
 vi.mock('@/lib/services/clinicAuthorization', () => mockAuth);
 
 const mockLogging = vi.hoisted(() => ({ logEvent: vi.fn() }));
 vi.mock('@/lib/server/logging', () => mockLogging);
 
-const mockSupabaseServer = vi.hoisted(() => {
+const mockSupabaseAdmin = vi.hoisted(() => {
   const q: Record<string, any> = {
     from: vi.fn(), select: vi.fn(), insert: vi.fn(), update: vi.fn(), eq: vi.fn(), order: vi.fn(), single: vi.fn(), upsert: vi.fn(), delete: vi.fn(), in: vi.fn(),
   };
-  return { createSupabaseServerClient: () => q };
+  return { supabaseAdmin: q };
 });
-vi.mock('@/lib/supabase/server', () => mockSupabaseServer);
+vi.mock('@/lib/supabase/admin', () => mockSupabaseAdmin);
 
 import { GET as getSchedule, PUT as putSchedule } from '@/app/api/clinic/providers/[providerId]/schedule/route';
 import { GET as getAssignments, PUT as putAssignments } from '@/app/api/clinic/providers/[providerId]/services/route';
@@ -30,7 +30,7 @@ function jsonBody(data: unknown): RequestInit {
 }
 
 function resetChain() {
-  const q = mockSupabaseServer.createSupabaseServerClient();
+  const q = mockSupabaseAdmin.supabaseAdmin;
   q.from.mockReturnValue(q);
   q.select.mockReturnValue(q);
   q.eq.mockReturnValue(q);
@@ -51,7 +51,7 @@ describe('Provider Schedule API', () => {
   });
 
   it('gets schedule for an authorized clinic member', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
+    const q = mockSupabaseAdmin.supabaseAdmin;
     q.order.mockResolvedValue({ data: [{ weekday: 1, enabled: true, start_time: '09:00', end_time: '17:00' }], error: null });
     const res = await getSchedule(makeRequest(`http://localhost/api/clinic/providers/${PROVIDER}/schedule?clinic_id=${CLINIC_A}`));
     const body = await res.json();
@@ -66,7 +66,7 @@ describe('Provider Schedule API', () => {
   });
 
   it('returns 404 when provider is not in the clinic', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
+    const q = mockSupabaseAdmin.supabaseAdmin;
     q.single.mockResolvedValue({ data: null, error: { message: 'not found' } });
     const res = await getSchedule(makeRequest(`http://localhost/api/clinic/providers/${PROVIDER}/schedule?clinic_id=${CLINIC_A}`));
     expect(res.status).toBe(404);
@@ -110,7 +110,7 @@ describe('Provider/Service Assignment API', () => {
   });
 
   it('gets assignments for an authorized clinic member', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
+    const q = mockSupabaseAdmin.supabaseAdmin;
     // Sequence eq calls: provider single uses 2 eqs, provider_services uses 2 eqs — make first three chainable and the 4th resolve
     q.eq.mockImplementationOnce(() => q).mockImplementationOnce(() => q).mockImplementationOnce(() => q).mockResolvedValueOnce({ data: [{ service_id: SERVICE }], error: null });
     const res = await getAssignments(makeRequest(`http://localhost/api/clinic/providers/${PROVIDER}/services?clinic_id=${CLINIC_A}`));
@@ -126,7 +126,7 @@ describe('Provider/Service Assignment API', () => {
   });
 
   it('saves assignments for services in the same clinic', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
+    const q = mockSupabaseAdmin.supabaseAdmin;
     // The terminal method for clinic_services query is `in`, mock it to return the clinic services
     q.in.mockResolvedValueOnce({ data: [{ id: SERVICE }], error: null });
     // Sequence eq calls: provider single (2 eqs) + clinic_services eq (1) + delete eq (1) -> make first 4 chainable then final resolve
@@ -136,7 +136,7 @@ describe('Provider/Service Assignment API', () => {
   });
 
   it('rejects assignment to a service from another clinic', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
+    const q = mockSupabaseAdmin.supabaseAdmin;
     // Sequence eq calls: provider single (2 eqs) + clinic_services eq (1) -> make them chainable, and have `in` return no services
     q.eq.mockImplementationOnce(() => q).mockImplementationOnce(() => q).mockImplementationOnce(() => q);
     q.in.mockResolvedValueOnce({ data: [], error: null });

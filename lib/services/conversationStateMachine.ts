@@ -193,11 +193,28 @@ export async function persistConversationState(
   conversationId: string,
   state: ConversationStateDetail
 ): Promise<void> {
+  // State persistence shares `conversations.metadata` with PatientContext and
+  // conversation intelligence. Read the existing object first so this update
+  // never discards subject_analysis or future metadata fields.
+  const { data: existing, error: existingError } = await supabaseAdmin
+    .from('conversations')
+    .select('metadata')
+    .eq('id', conversationId)
+    .eq('clinic_id', clinicId)
+    .maybeSingle();
+
+  if (existingError) {
+    logEvent('conversation_state_metadata_load_failed', { clinic_id: clinicId, conversation_id: conversationId, error: existingError.message }, 'error');
+    return;
+  }
+
+  const existingMetadata = (existing?.metadata ?? {}) as Record<string, unknown>;
   const { error } = await supabaseAdmin
     .from('conversations')
     .update({
       conversation_state: mapToLegacyConversationState(state.state),
       metadata: {
+        ...existingMetadata,
         ...state,
         updated_at: new Date().toISOString(),
       },

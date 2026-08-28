@@ -13,7 +13,7 @@ const mockSupabase = vi.hoisted(() => ({
     from: vi.fn(),
   },
 }));
-vi.mock('@/lib/supabase', () => mockSupabase);
+vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: mockSupabase.supabase }));
 
 const mockLogging = vi.hoisted(() => ({
   logEvent: vi.fn(),

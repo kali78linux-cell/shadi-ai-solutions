@@ -30,9 +30,12 @@ describe('conversation intelligence', () => {
     expect(result.lead.temperature).toBe('warm');
   });
 
-  it('hands off low-confidence unknown messages at a configured threshold', () => {
-    const result = detectConversationIntelligence('hello there', 0.8);
-    expect(result.intent).toBe('unknown');
+  // Production deliberately treats unknown/greeting/general as conversational and
+  // lets the AI answer. The real handoff guard fires on a MATCHED non-conversational
+  // intent whose confidence falls below the configured threshold.
+  it('hands off low-confidence non-conversational messages at a configured threshold', () => {
+    const result = detectConversationIntelligence('where is the clinic located', 0.8);
+    expect(result.intent).toBe('location');
     expect(result.confidence).toBeLessThan(0.8);
     expect(result.state).toBe('awaiting_staff');
   });

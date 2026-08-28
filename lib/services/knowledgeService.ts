@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import { extractTextFromBuffer, chunkText } from '@/lib/ai/docParser';
 import { getProvider } from '@/lib/ai/provider';
+import { ensureAIProviders } from '@/lib/ai/providers/registry';
 
 export class KnowledgeService {
   private supabase: SupabaseClient;
@@ -35,6 +36,9 @@ export class KnowledgeService {
         .insert({
           clinic_id: clinicId,
           uploaded_by: userId,
+          // The deployed schema retains the legacy required filename column
+          // alongside original_filename; populate both for compatibility.
+          filename: file.name,
           original_filename: file.name,
           file_type: file.type,
           mime_type: file.type,
@@ -57,13 +61,15 @@ export class KnowledgeService {
       throw new Error(`Failed to create document record: ${dbError.message}`);
     }
 
-    // Asynchronously invoke the Edge Function to process the document in the background.
+    // Prefer the deployed Edge Function. If it is unavailable, process through
+    // this same tested service path instead of leaving a successful upload stuck.
     try {
-      await this.supabase.functions.invoke('process-document', {
+      const { error: functionError } = await this.supabase.functions.invoke('process-document', {
         body: { documentId: docData.id, storagePath },
       });
+      if (functionError) await this.processDocument(docData.id, file);
     } catch (error) {
-      console.error('Edge function invocation failed, marking document as failed:', error);
+      console.error('Knowledge document processing failed, marking document as failed:', error);
       await this.supabase
         .from('clinic_knowledge_documents')
         .update({ processing_status: 'failed' })
@@ -86,7 +92,9 @@ export class KnowledgeService {
       const fileBuffer = Buffer.from(await file.arrayBuffer());
       const content = await extractTextFromBuffer(fileBuffer, file.name);
       const chunks = chunkText(content);
+      ensureAIProviders();
       const provider = getProvider();
+      if (!provider?.embed) throw new Error('The configured AI provider does not support embeddings.');
       const { data: doc } = await this.supabase.from('clinic_knowledge_documents').select('clinic_id').eq('id', documentId).single();
       const clinicId = doc?.clinic_id;
 
@@ -106,6 +114,9 @@ export class KnowledgeService {
           content: chunk,
           chunk_index: i,
           embedding: embedResult.embedding,
+          // `match_clinic_documents` indexes/querys this vector column.
+          // Keep the legacy embedding field populated for existing consumers.
+          embedding_vector: embedResult.embedding,
         });
       }
 

@@ -109,11 +109,26 @@ export async function isClinicHoliday(clinicId: string, date: string): Promise<b
 
 /**
  * Returns the active services for a clinic (public-safe, no internal fields).
+ * Flexible pricing: `price` is the fixed/default price; null or 0 means
+ * "unspecified" (never presented to patients as free). Range/estimate/
+ * case-by-case pricing is exposed via pricing_type + price_min/price_max.
  */
-export async function getActiveServices(clinicId: string): Promise<Array<{ id: string; name: string; description: string | null; duration_minutes: number; price: number | null }>> {
+export type PublicService = {
+  id: string;
+  name: string;
+  description: string | null;
+  duration_minutes: number;
+  price: number | null;
+  pricing_type: 'unspecified' | 'fixed' | 'estimate' | 'range' | 'case_by_case';
+  price_min: number | null;
+  price_max: number | null;
+  price_visible_to_patients: boolean;
+};
+
+export async function getActiveServices(clinicId: string): Promise<PublicService[]> {
   const { data, error } = await supabaseAdmin
     .from('clinic_services')
-    .select('id, name, description, duration_minutes, price')
+    .select('id, name, description, duration_minutes, price, pricing_type, price_min, price_max, price_visible_to_patients')
     .eq('clinic_id', clinicId)
     .eq('active', true)
     .is('deleted_at', null)
@@ -128,7 +143,12 @@ export async function getActiveServices(clinicId: string): Promise<Array<{ id: s
     name: row.name,
     description: row.description ?? null,
     duration_minutes: row.duration_minutes,
-    price: row.price ?? null,
+    // price = 0 is treated as unspecified, NOT as "free".
+    price: row.price != null && Number(row.price) > 0 ? Number(row.price) : null,
+    pricing_type: (row.pricing_type ?? 'unspecified') as PublicService['pricing_type'],
+    price_min: row.price_min != null ? Number(row.price_min) : null,
+    price_max: row.price_max != null ? Number(row.price_max) : null,
+    price_visible_to_patients: row.price_visible_to_patients !== false,
   }));
 }
 
@@ -282,6 +302,32 @@ export async function findOrCreatePatient(params: {
 }): Promise<string> {
   const { clinicId, name, phone, email } = params;
 
+  const findExistingPatient = async (): Promise<string | null> => {
+    if (phone) {
+      const { data } = await supabaseAdmin
+        .from('patients')
+        .select('id')
+        .eq('clinic_id', clinicId)
+        .eq('phone_number', phone)
+        .is('deleted_at', null)
+        .limit(1)
+        .maybeSingle();
+      if (data) return data.id;
+    }
+    if (email) {
+      const { data } = await supabaseAdmin
+        .from('patients')
+        .select('id')
+        .eq('clinic_id', clinicId)
+        .ilike('email', email)
+        .is('deleted_at', null)
+        .limit(1)
+        .maybeSingle();
+      if (data) return data.id;
+    }
+    return null;
+  };
+
   // 1. Lookup by phone
   if (phone) {
     const { data: byPhone, error: phoneError } = await supabaseAdmin
@@ -320,13 +366,22 @@ export async function findOrCreatePatient(params: {
     .insert({
       clinic_id: clinicId,
       full_name: name,
-      email: email ?? '',
+      // NULL (not '') — the unique index (clinic_id, lower(email)) treats ''
+      // as a value, so two phone-only patients in the same clinic would collide.
+      email: email ?? null,
       phone_number: phone ?? null,
     })
     .select('id')
     .single();
 
   if (createError) {
+    // Concurrent booking requests for the same patient can both miss the
+    // initial lookup. The database uniqueness constraint wins; re-read the
+    // tenant-scoped patient rather than turning the second booking into 500.
+    if (createError.code === '23505' || /duplicate key/i.test(createError.message)) {
+      const existing = await findExistingPatient();
+      if (existing) return existing;
+    }
     throw new Error('Failed to create patient record');
   }
 
@@ -344,6 +399,23 @@ function generateBookingToken(): { token: string; tokenHash: string } {
 }
 
 /**
+ * Validates a patient phone number before an appointment is created.
+ *
+ * This is a hard server-side rule — the phone is required to place a booking
+ * (for contact/reminders and appointment reschedules/cancellations). It must be
+ * a non-empty, non-whitespace string of a plausible phone form (digits with
+ * optional leading "+", spaces, dashes, parentheses). Rejects null, blank,
+ * and values that look nothing like a phone number.
+ */
+export function isValidBookingPhone(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (trimmed.length < 5 || trimmed.length > 30) return false;
+  // Digits with optional leading + and common separators; no letters/symbols.
+  return /^\+?[0-9()[\]\s-]{4,29}$/.test(trimmed) && /\d/.test(trimmed);
+}
+
+/**
  * Verifies a slot is still available at booking time and creates a tentative appointment.
  * Re-checks availability to prevent double-booking between GET and POST.
  * Generates a secure booking token so the patient can later confirm/cancel without staff auth.
@@ -356,9 +428,26 @@ export async function createBooking(params: {
   time: string;
   patientId: string;
   serviceId?: string;
+  conversationId?: string | null;
   durationMinutes?: number;
 }): Promise<{ id: string; scheduled_at: string; status: string; booking_token: string }> {
-  const { clinicId, providerId, service, date, time, patientId, serviceId, durationMinutes } = params;
+  const { clinicId, providerId, service, date, time, patientId, serviceId, conversationId, durationMinutes } = params;
+
+  // A chat-originated booking may carry its source conversation. Verify its
+  // clinic ownership before persisting the link; the public booking page can
+  // still create a booking without a conversation.
+  if (conversationId) {
+    const { data: conversation, error: conversationError } = await supabaseAdmin
+      .from('conversations')
+      .select('id')
+      .eq('id', conversationId)
+      .eq('clinic_id', clinicId)
+      .is('deleted_at', null)
+      .maybeSingle();
+    if (conversationError || !conversation) {
+      throw new Error('Conversation not found for this clinic');
+    }
+  }
 
   const schedule = await loadProviderSchedule(clinicId, providerId);
   if (!schedule) {
@@ -408,6 +497,8 @@ export async function createBooking(params: {
       provider_id: providerId,
       patient_id: patientId,
       service,
+      service_id: serviceId ?? null,
+      conversation_id: conversationId ?? null,
       appointment_date: date,
       scheduled_at: startsAt,
       duration_minutes: resolvedDuration,
@@ -423,6 +514,46 @@ export async function createBooking(params: {
       throw new Error('Slot unavailable: concurrent booking');
     }
     throw new Error('Failed to create appointment');
+  }
+
+  // Keep a public-safe booking summary in the conversation metadata in
+  // addition to the relational `conversation_id` link. This lets the chat
+  // resume its booking state without querying appointment details.
+  if (conversationId) {
+    const { data: conversation, error: metadataLoadError } = await supabaseAdmin
+      .from('conversations')
+      .select('metadata')
+      .eq('id', conversationId)
+      .eq('clinic_id', clinicId)
+      .maybeSingle();
+    if (metadataLoadError || !conversation) {
+      logEvent('booking_conversation_link_failed', { clinic_id: clinicId, appointment_id: data.id, conversation_id: conversationId }, 'error');
+    } else {
+      const metadata = (conversation.metadata ?? {}) as Record<string, unknown>;
+      const { error: metadataUpdateError } = await supabaseAdmin
+        .from('conversations')
+        .update({
+          metadata: {
+            ...metadata,
+            booking: {
+              ...(metadata.booking as Record<string, unknown> ?? {}),
+              appointment_id: data.id,
+              service_id: serviceId ?? null,
+              provider_id: providerId,
+              status: 'tentative',
+              // Persisted so later turns ("موعدي متى؟") answer from REAL
+              // data instead of inventing a slot.
+              scheduled_at: startsAt,
+              updated_at: new Date().toISOString(),
+            },
+          },
+        })
+        .eq('id', conversationId)
+        .eq('clinic_id', clinicId);
+      if (metadataUpdateError) {
+        logEvent('booking_conversation_link_failed', { clinic_id: clinicId, appointment_id: data.id, conversation_id: conversationId }, 'error');
+      }
+    }
   }
 
   // Schedule appointment reminders (best-effort — communication failure must NOT fail the booking)

@@ -56,6 +56,19 @@ describe('Conversation State Machine (deterministic — no LLM required)', () =>
     expect(next.patient_confirmed_booking).toBe(false);
   });
 
+  it('booking intent without a valid service/provider recommendation stays in discovery', () => {
+    const current = stateWithProblem();
+    const next = transitionConversationState({
+      intent: 'appointment_booking',
+      patientText: 'بدي موعد',
+      current,
+      hasUrgentSignal: false,
+      patientRequestsHuman: false,
+    });
+    expect(next.state).toBe(CONVERSATION_STATES.DISCOVERING_PROBLEM);
+    expect(next.state).not.toBe(CONVERSATION_STATES.AWAITING_BOOKING_CONFIRMATION);
+  });
+
   it('explicit confirmation ("نعم احجز") moves to BOOKING only from AWAITING_BOOKING_CONFIRMATION', () => {
     const current = stateWithProblem({ likely_specialty: 'زراعة' });
     current.state = CONVERSATION_STATES.AWAITING_BOOKING_CONFIRMATION;

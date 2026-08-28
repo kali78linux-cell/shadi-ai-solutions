@@ -3,6 +3,8 @@ import { RetrievalResult } from '@/lib/services/knowledge/retrieval';
 import { ContextChunk, SourceCitation } from '@/lib/services/knowledge/contextAssembly';
 import { detectLanguage } from '@/lib/services/knowledge/multilingual';
 import { ConversationIntent, ConversationState } from '@/lib/ai/intelligence';
+import type { ClinicOperatingData } from '@/lib/ai/clinicDataContext';
+import type { ReceptionistConversationState } from '@/lib/ai/clinicDataContext';
 
 type HistoryMessage = Pick<Message, 'role' | 'content'>;
 
@@ -40,6 +42,19 @@ export interface PromptOptions {
     preferredDate?: string | null;
     preferredTime?: string | null;
   };
+  /**
+   * Real clinic operating data (services + providers + assignments) read from
+   * the DB. This is the SOURCE OF TRUTH for what the clinic offers. Present
+   * even when the Knowledge Base is empty so the AI can recommend real
+   * services/providers instead of answering "information unavailable".
+   */
+  operatingData?: ClinicOperatingData | null;
+  /**
+   * Serialized receptionist state (state machine stage, recommendation, what
+   * booking info is still missing). Lets the AI ask ONLY the next missing
+   * question and never repeat known information.
+   */
+  receptionistState?: ReceptionistConversationState | null;
 }
 
 /**
@@ -75,6 +90,7 @@ These are general educational points — they are NOT clinic-specific, prices, o
 const DEFAULT_PROMPT_TEMPLATE = `You are a helpful AI assistant for a dental clinic. Your name is {assistant_name}.
 Your tone should be {tone}.
 You must respond in {language}.
+GENDER-NEUTRAL ADDRESS (mandatory): the patient's gender is unknown. Address them neutrally — e.g. «يبدو أن لديك…», «هل يمكنك توضيح…», «أفهم أن هناك…». NEVER use gendered verb forms like «تواجهين», «ستجدين», «يمكنكِ», or any masculine/feminine form that assumes the patient's gender.
 
 Use information this way:
 1. For any clinic-specific detail (appointments, prices, services, hours, location, insurance, policies), answer ONLY from the Clinic Context below. If not in context, say you don't have that information.
@@ -168,6 +184,7 @@ export function buildPrompt(
 
   // Combine all optional sections
   const optionalSections = [
+    buildSourceSeparationSection(Boolean(context.trim())),
     clinicInfoSection,
     safetyRulesSection,
     answerBoundariesSection,
@@ -175,6 +192,8 @@ export function buildPrompt(
     intentSection,
     conversationStateSection,
     patientContextSection,
+    buildOperatingDataSection(options?.operatingData),
+    buildReceptionistModeSection(options?.receptionistState),
     citationInstructionsSection,
   ].filter(Boolean).join('\n\n');
 
@@ -183,9 +202,10 @@ export function buildPrompt(
     let fallbackPrompt = `You are a helpful assistant with a dental clinic named {assistant_name}.
 Your tone should be {tone}.
 You must respond in {language}.
+GENDER-NEUTRAL ADDRESS (mandatory): the patient's gender is unknown. Address them neutrally — e.g. «يبدو أن لديك…», «هل يمكنك توضيح…». NEVER use gendered verb forms like «تواجهين», «ستجدين», «يمكنكِ».
 
 Use this information:
-1. For any clinic-specific detail (appointments, prices, services, hours, location, insurance, policies), if you do NOT have it in context, say you don't have that information.
+1. For any clinic-specific detail (services, providers, appointments, prices, hours, location, insurance, policies), use the Clinic Operating Data section when present (it is the source of truth from the clinic database). Only say you don't have that information when it is truly missing from both sections.
 2. For general dental-health questions, you may use the General Dental Knowledge section below, and always add the note that it is general information and the final assessment must be by a dentist after an examination.
 3. Never invent or guess clinic facts.
 
@@ -230,14 +250,39 @@ Question: {question}`;
  * Builds the clinic information section for the prompt.
  * Only included when clinic info data is provided.
  */
+/**
+ * STEP 4 — Strict data-source separation & anti-hallucination directive.
+ *
+ * Tells the model the authoritative hierarchy of facts and that a low/high
+ * confidence RAG hit is still a CLINIC-document source, never general
+ * knowledge, and never a replacement for OperatingData.
+ */
+function buildSourceSeparationSection(hasContext: boolean): string {
+  const ragLine = hasContext
+    ? '- RAG / Clinic Knowledge: only what is quoted below with its [Source: …] and Confidence. Treat it as CLINIC documentation — never as general knowledge. If Confidence is below the threshold, you must NOT state it as a confirmed clinic fact; say it is not confirmed.'
+    : '- RAG / Clinic Knowledge: none was retrieved for this turn. Do NOT pretend there is any clinic document; if a clinic-specific fact is missing, say it is not available.';
+  return [
+    'DATA SOURCE SEPARATION (mandatory — do not cross these boundaries):',
+    '- ClinicFacts (name/address/phone/website): ONLY from the Clinic Information section. Never invent or infer them.',
+    '- OperatingData (services/providers/assignments): ONLY from the Clinic Operating Data section. Never invent a service, doctor, or price.',
+    ragLine,
+    '- General Dental Knowledge: ONLY for educational answers about dentistry in general. Always add the note that it is general information and the final assessment is made by a dentist after an examination. NEVER present general knowledge as this clinic\'s policy/price/doctor/availability.',
+    '- ConversationState: context about the CURRENT patient (their location, requested service, reported symptoms). It is never clinic fact. In particular, patient_location is about the PATIENT, not the clinic.',
+    '- NEVER calculate availability, timezones, or slots yourself. Availability is provided ONLY by the real availability system (see REAL AVAILABILITY / booking notes). If none is provided, say availability needs confirmation.',
+  ].join('\n');
+}
+
 function buildClinicInfoSection(clinicInfo?: PromptOptions['clinicInfo']): string {
   if (!clinicInfo) return '';
 
-  const lines: string[] = ['Clinic Information:'];
+  const lines: string[] = ['Clinic Information: (authoritative facts from the clinic database)'];
   if (clinicInfo.name) lines.push(`- Name: ${clinicInfo.name}`);
   if (clinicInfo.address) lines.push(`- Address: ${clinicInfo.address}`);
   if (clinicInfo.phone) lines.push(`- Phone: ${clinicInfo.phone}`);
   if (clinicInfo.website) lines.push(`- Website: ${clinicInfo.website}`);
+  lines.push('- These are the ONLY clinic facts you may state. If a field (name/address/phone/website) is ABSENT above, you do NOT have it — say so clearly. NEVER invent a clinic name/address/phone/website.');
+  lines.push('- Use the clinic NAME exactly as written above — VERBATIM. Do NOT transliterate, rename, or invent an Arabic nickname for the clinic.');
+  lines.push('- NEVER infer the clinic location from the patient\'s city/town. The clinic location is ONLY the one listed above (if any). If the patient asks "وين العيادة؟" and no address is listed, honestly say the address is not currently available.');
 
   if (lines.length === 1) return ''; // No actual info to show
   return lines.join('\n');
@@ -308,8 +353,117 @@ function buildPatientContextSection(patientContext?: PromptOptions['patientConte
 
 /**
  * Builds the source citation instructions section for the prompt.
- * Instructs the AI to cite sources in the specified format.
+/**
+ * Builds the clinic operating data section — the REAL services/providers the
+ * clinic offers, straight from the DB (not the Knowledge Base). The AI must
+ * treat this as the source of truth and never invent a service/provider.
  */
+function buildOperatingDataSection(operatingData?: ClinicOperatingData | null): string {
+  if (!operatingData || operatingData.services.length === 0) return '';
+
+  const parts: string[] = ['Clinic Operating Data (source of truth from the clinic database):'];
+  parts.push('Available services:');
+  for (const s of operatingData.services) {
+    const priceNote = describePriceForPrompt(s.id, operatingData);
+    const providersForService = operatingData.providers.filter((p) =>
+      operatingData.providerServiceIds.some((a) => a.service_id === s.id && a.provider_id === p.id)
+    );
+    const providerNames = providersForService.length > 0
+      ? providersForService.map((p) => p.name).join('، ')
+      : 'no assigned provider yet';
+    parts.push(`- ${s.name}${s.description ? `: ${s.description}` : ''} (duration: ${s.duration_minutes} min)${priceNote}`);
+    parts.push(`  Providers who provide it: ${providerNames}`);
+  }
+  if (operatingData.providers.length > 0) {
+    parts.push('Clinic dentists/doctors:');
+    for (const p of operatingData.providers) {
+      parts.push(`- ${p.name}${p.title ? ` (${p.title})` : ''}`);
+    }
+  }
+  parts.push('If the patient asks about a service NOT in this list, do not invent it and offer human help.');
+  return parts.join('\n');
+}
+
+function describePriceForPrompt(serviceId: string, data: ClinicOperatingData): string {
+  const s = data.services.find((x) => x.id === serviceId);
+  if (!s) return '';
+  if (s.price_visible_to_patients === false) return '';
+  if (s.pricing_type === 'fixed' && s.price_min != null && Number(s.price_min) > 0) return `, price: ${s.price_min}`;
+  if (s.pricing_type === 'range' && s.price_min != null && s.price_max != null && Number(s.price_min) > 0) return `, price range: ${s.price_min}–${s.price_max}`;
+  if (s.pricing_type === 'estimate' && s.price_min != null && Number(s.price_min) > 0) return `, estimated price: approx ${s.price_min}`;
+  if (s.pricing_type === 'case_by_case') return ', price: depends on the case (after the doctor’s examination)';
+  return '';
+} // unspecified → omitted; never "free"
+
+/**
+ * THE core receptionist behavioral section: open-ended natural Arabic
+ * conversation driven by meaning, not keywords. The AI leads the dialogue,
+ * asks only the NEXT missing question, recommends real DB resources, collects
+ * the patient's name/phone in-conversation, and never fabricates anything.
+ */
+function buildReceptionistModeSection(receptionistState?: ReceptionistConversationState | null): string {
+  if (!receptionistState) return '';
+
+  const lines: string[] = ['RECEPTIONIST OPERATING MODE (follow strictly):'];
+  lines.push('- Drive the conversation proactively. Understand the patient in ANY Arabic phrasing (colloquial or formal) from MEANING, not keyword matching. Talk naturally in Arabic (mirror the patient\'s style), keep replies short and warm.');
+  lines.push('- Ask ONLY the single next missing question. Never ask again for something the patient already gave in this conversation.');
+  lines.push(`- Current conversation stage: ${receptionistState.state}.`);
+  if (receptionistState.recommended_service_id) {
+    lines.push(`- Recommended service id: ${receptionistState.recommended_service_id}.`);
+  }
+  if (receptionistState.recommended_provider_id) {
+    lines.push(`- Recommended provider id: ${receptionistState.recommended_provider_id} — only mention the provider NAME from Clinic Operating Data, never invent another doctor.`);
+  }
+  if (!receptionistState.recommended_provider_id) {
+    lines.push('- Do NOT recommend or promise a specific doctor yet unless you have a real match in Clinic Operating Data.');
+  }
+  if (receptionistState.state === 'RECOMMENDING_PROVIDER') {
+    lines.push('- You are proposing a specific real service/doctor. Present the matched service (from Operating Data) and the doctor (from Operating Data) and ask whether the patient wants to book it.');
+  }
+  if (receptionistState.state === 'DISCOVERING_PROBLEM' || !receptionistState.recommended_service_id) {
+    lines.push('- The service/doctor is not known yet. Ask the patient which treatment/need they have and name the REAL services from Clinic Operating Data as examples (e.g. exam, cleaning, X-ray). Do NOT hand off or claim there is no availability just because the service is unspecified.');
+  }
+  if (receptionistState.state === 'AWAITING_BOOKING_CONFIRMATION') {
+    lines.push('- The patient has a recommendation. Confirm the service + doctor and ask whether they want to book (one clear yes/no question).');
+  }
+  if (receptionistState.state === 'BOOKING') {
+    lines.push('- Booking in progress. Collect missing details conversationally: patient full name, phone number, then preferred day/time. Confirm the slot before finalizing. When all details are known and the patient confirms, say the booking is complete and mention the scheduled day/time.');
+  }
+  if (receptionistState.booking_issue) {
+    lines.push(`- Booking note for this turn: ${receptionistState.booking_issue}`);
+  }
+  if (receptionistState.specialty_guidance) {
+    lines.push(
+      `- Specialty guidance for this turn: the patient's request names "${receptionistState.specialty_guidance}" but THIS clinic has no such service in Clinic Operating Data. Do NOT invent a price, slot, or booking for it. Say its availability needs confirmation from the clinic reception, offer to take their contact details or hand off for exact pricing, and you may mention a matching specialist ONLY if one appears verbatim in Clinic Operating Data.`
+    );
+  }
+  // STEP 5 — Network Discovery Mode: rendered ONLY when this turn's message
+  // explicitly asked for other/nearby clinics. The guidance text is built from
+  // the REAL clinic directory (never invented); absent → Clinic Reception Mode.
+  if (receptionistState.discovery_guidance) {
+    lines.push(`- ${receptionistState.discovery_guidance}.`);
+    lines.push('- This clinic remains the default. These alternatives are listed ONLY because the patient explicitly asked; do not push the patient away, and keep serving this clinic unless they choose an alternative.');
+  }
+  // Phase 20 — booking memory: when this conversation already created a real
+  // appointment, the AI can answer "موعدي متى؟" from REAL persisted data.
+  if (receptionistState.booking?.appointment_id && receptionistState.booking?.scheduled_at) {
+    lines.push(`- Existing booking in THIS conversation: appointment ${receptionistState.booking.appointment_id}, scheduled at ${receptionistState.booking.scheduled_at}${receptionistState.booking.appointment_status ? ` (status: ${receptionistState.booking.appointment_status})` : ''}. If the patient asks when their appointment is, answer with EXACTLY this day/time; do not invent another slot.`);
+  }
+  // A REAL slot resolved from the availability system (but not yet booked) — the
+  // patient may follow up with "أي ساعة؟"/"بدي أقرب موعد". Present EXACTLY this.
+  if (receptionistState.booking?.slot && !receptionistState.booking?.appointment_id) {
+    lines.push(`- REAL proposed slot for this conversation (from the booking system): ${receptionistState.booking.slot}. When the patient asks about the time/date or says they want to book, present EXACTLY this day and time and ask for confirmation. NEVER invent another slot.`);
+  }
+  lines.push('- Pricing: never say free. If the price is not shown, say "السعر النهائي بيعتمد على حالتك وبعد فحص الطبيب".');
+  lines.push('- Never invent: services, doctors, prices, policies, dates, diagnoses, distances. For "doctor near me" without reliable location data, invite the patient to share their area.');
+  lines.push('- Emergency escalations (severe swelling, breathing/swallowing difficulty, heavy bleeding): advise immediate care and hand off to staff.');
+  lines.push('- STRICT GROUNDING: State ONLY clinic facts that appear in Clinic Information / Operating Data. NEVER add descriptive words like "متميز", "خبير", "الأفضل", "الأشهر" unless they appear VERBATIM in clinic data. NEVER invent a clinic name/address/phone, doctors, titles, services, prices, policies, or dates.');
+  lines.push('- LOCATION: NEVER infer the clinic location from the patient\'s city/area. If the patient says they live in a city, that is about THEM, not the clinic. The clinic location is ONLY the address in Clinic Information (if any); otherwise say it is not currently available.');
+  lines.push('- REAL AVAILABILITY ONLY: NEVER invent a date or time for an appointment. If the booking note / REAL AVAILABILITY above provides a concrete slot, present exactly that day and time and ask for confirmation. If no real slot is provided, do NOT invent one — say availability needs to be confirmed and offer to hand off to the clinic reception.');
+  lines.push('- PROVIDERS: only list doctors that appear in Clinic Operating Data, with exactly their recorded title. Do not invent credentials or specialties.');
+
+  return lines.join('\n');
+}
 function buildCitationInstructionsSection(): string {
   return `Source Citation Instructions:
 - When referencing information from the context, cite the source using the format: [Source: filename, ID: document_id, Chunk: chunk_index]

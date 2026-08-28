@@ -100,6 +100,16 @@ export function isDemoRequest(req?: Request) {
   return process.env.NODE_ENV !== 'production' && (header === 'true' || header === '1' || process.env.NEXT_PUBLIC_ENABLE_DEMO_FALLBACK === 'true');
 }
 
+/**
+ * ZERO DEMO LEAKAGE guard: in-memory demo data may ONLY ever be served in
+ * non-production runtimes. A production deployment with missing Supabase env
+ * vars must fail loudly (auth/config errors), never silently serve fake
+ * patients/appointments/conversations.
+ */
+export function demoFallbackAllowed(): boolean {
+  return process.env.NODE_ENV !== 'production';
+}
+
 export function getDemoPatients() {
   return demoPatients.map((patient) => ({ ...patient }));
 }

@@ -161,14 +161,34 @@ export async function classifyIntentSemantic(text: string): Promise<SemanticInte
  *  1. Very explicit obvious actions ("إلغاء" → cancellation, "بدي احجز" → booking)
  *  2. Emergency safety signals (difficulty breathing, severe swelling)
  * This does NOT replace the LLM classifier.
+ *
+ * IMPORTANT ROOT-CAUSE FIX: JavaScript `\b` word boundaries are defined by
+ * `\w` = [A-Za-z0-9_] which is ASCII-only, so `\b(احجز)\b` could NEVER match
+ * any Arabic text — the whole Arabic fast-path was dead. All boundaries below
+ * therefore use Unicode letter/digit lookarounds, and common clitic-suffixed
+ * verb forms (احجزلي، الغيلي…) are enumerated longest-first so agglutinated
+ * Palestinian phrasings still match.
  */
-const EXACT_EMERGENCY = /صعوبة بالتنفس|مش قادر اتنفس|can't breathe|cannot breathe|swelling|تورم كبير|انتفاخ كبير|نزيف|bleeding|swallow|صعوبة بلع|trouble breathing|urgent|طوارئ/i;
-const EXACT_CANCEL = /\b(إلغاء|الغاء|الغي|بطل)\b|cancel|cancellation/i;
-const EXACT_BOOKING = /\b(احجز|ابدي احجز|بدي حجز|بدي موعد|حجز|book|appointment)\b/i;
-const EXACT_RESCHEDULE = /\b(تأجيل|تغيير الموعد|تعديل الموعد|reschedule|change appointment|ارحل الموعد|نقل الموعد)\b/i;
-const EXACT_HANDOFF = /\b(بدي احكي مع موظفة|بدي احكي مع موظف|بدي احكي مع الدكتور|بدي حدا من العيادة|مش فاهم|human|agent|staff|call me)\b/i;
-const EXACT_GREETING = /^(مرحبا|اهلا|اهلين|صباح الخير|مساء الخير|هاي|هلا|سلام|hello|hi|hey)\b/i;
-const EXACT_GOODBYE = /^(شكرا|يسلمو|مع السلامة|باي|bye|goodbye|thanks)\b/i;
+const NO_LETTER_BEFORE = '(?<![\\p{L}\\p{N}])';
+const NO_LETTER_AFTER = '(?![\\p{L}\\p{N}])';
+
+/** Builds a pattern that matches any listed phrase with Unicode boundaries. */
+function unicodePhrasePattern(phrases: string): RegExp {
+  return new RegExp(`${NO_LETTER_BEFORE}(?:${phrases})${NO_LETTER_AFTER}`, 'iu');
+}
+
+// Safety net is intentionally broad (fail-safe): extra dialectal emergency
+// phrasings only cause a deterministic handoff, never a missed emergency.
+const EXACT_EMERGENCY = /صعوبة بالتنفس|صعوبة بالبلع|صعوبة التنفس|صعوبة البلع|مش قادر اتنفس|مش قادرة اتنفس|ما بقادر اتنفس|ما بقدر اتنفس|بتخنق|خنقه|خنقة|can't breathe|cannot breathe|can['’]t breathe|difficulty breathing|trouble breathing|swelling|تورم كبير|انتفاخ كبير|تورم شديد|نزيف|bleeding|swallow|صعوبة بلع|trouble swallowing|urgent|طوارئ/i;
+
+const EXACT_CANCEL = unicodePhrasePattern('إلغاء|الغاء|الغي|الغيلي|الغيها|الغيلها|الغينه|الغيني|بطل الحجز|بطل موعدي|cancel|cancellation');
+const EXACT_BOOKING = unicodePhrasePattern('احجزلي|احجزي|احجزنا|احجزها|احجزله|احجزهم|ابدي احجز|بدي احجز|بدي حجز|بدي موعد|اريد حجز|أريد حجز|حجز موعد|احجز|book|booking|appointment');
+const EXACT_RESCHEDULE = unicodePhrasePattern('تأجيل الموعد|تاجيل الموعد|تغيير الموعد|تعديل الموعد|بدي اغير موعدي|بدي أغير موعدي|بدي اجدد موعدي|بدي أجدد موعدي|reschedule|change appointment');
+const EXACT_HANDOFF = unicodePhrasePattern('بدي احكي مع موظفة|بدي احكي مع موظف|بدي احكي مع الدكتور|بدي حدى من العيادة|بدي حدا من العيادة|مش فاهم|مش فاهمة|human|agent|staff|call me');
+// A pure greeting/goodbye: phrase at the start, optionally followed by
+// punctuation/whitespace ONLY — "مرحبا بدي احجز" must NOT be a greeting.
+const EXACT_GREETING = new RegExp(`^${NO_LETTER_BEFORE}(مرحبا|مرحبة|اهلا|أهلا|اهلين|أهلين|صباح الخير|مساء الخير|مساء النور|هاي|هلا|سلام|hello|hi|hey)${NO_LETTER_AFTER}[\\s،,.!؟?:؛~]*$`, 'iu');
+const EXACT_GOODBYE = new RegExp(`^${NO_LETTER_BEFORE}(شكرا|شكراً|يسلمو|يسلموو|مع السلامة|باي|بايباي|bye|goodbye|thanks|thank you)${NO_LETTER_AFTER}[\\s،,.!؟?:؛~]*$`, 'iu');
 
 export function classifyIntentFastPath(text: string): SemanticIntentResult | null {
   const t = text.trim();
@@ -187,19 +207,32 @@ export function classifyIntentFastPath(text: string): SemanticIntentResult | nul
 }
 
 /**
- * Orchestrates semantic classification: try LLM first, fall back to fast-path,
- * then to a generic UNKNOWN.
+ * Orchestrates semantic classification: emergency safety signals first,
+ * then the LLM as PRIMARY, then the deterministic fast-path as a fallback
+ * when the LLM is unavailable, then a generic UNKNOWN.
+ *
+ * Ordering rationale (matches the documented design):
+ *  - Emergency signals always short-circuit (safety, deterministic).
+ *  - The LLM understands Arabic dialects/typos — it must see the message
+ *    first so phrases like "متى أقرب موعد؟" are classified by MEANING
+ *    (a question), not short-circuited by the keyword "موعد".
+ *  - The keyword fast-path remains as an offline fallback only.
  */
 export async function classifyIntent(text: string): Promise<SemanticIntentResult> {
-  // 1. Fast-path (deterministic, instant) — for explicit/emergency only
-  const fast = classifyIntentFastPath(text);
-  if (fast) return fast;
+  // 0. Emergency safety signals — always deterministic and first.
+  if (EXACT_EMERGENCY.test(text.trim())) {
+    return { intent: SEMANTIC_INTENTS.URGENT_SIGNAL, confidence: 0.98, entities: { urgency: 'critical' } };
+  }
 
-  // 2. Primary semantic (LLM)
+  // 1. Primary semantic (LLM).
   const semantic = await classifyIntentSemantic(text);
   if (semantic) return semantic;
 
-  // 3. Fallback to unknown — orchestrator will handle it conversationally
+  // 2. Deterministic fast-path fallback when the LLM is unavailable.
+  const fast = classifyIntentFastPath(text);
+  if (fast) return fast;
+
+  // 3. Fallback to unknown — orchestrator will handle it conversationally.
   return { intent: SEMANTIC_INTENTS.UNKNOWN, confidence: 0.2, entities: {} };
 }
 

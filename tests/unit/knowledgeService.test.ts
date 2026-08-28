@@ -13,6 +13,7 @@ const mockProvider = vi.hoisted(() => ({
   getProvider: vi.fn(),
 }));
 vi.mock('@/lib/ai/provider', () => mockProvider);
+vi.mock('@/lib/ai/providers/registry', () => ({ ensureAIProviders: vi.fn() }));
 
 // Mock Supabase client — use mockReturnValue for reliable chaining
 const mockSupabase = {
@@ -54,11 +55,13 @@ vi.mock('uuid', () => ({
 describe('KnowledgeService', () => {
   let knowledgeService: KnowledgeService;
   const mockEmbeddingProvider = {
-    generateEmbedding: vi.fn(),
+    embed: vi.fn(),
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSupabase.single.mockReset();
+    mockSupabase.functions.invoke.mockReset();
     // Re-set chainable return values after clearAllMocks
     mockSupabase.storage.from.mockReturnValue(mockSupabase.storage);
     [
@@ -73,6 +76,7 @@ describe('KnowledgeService', () => {
     const supabaseClient = createClient('http://mock.url', 'mock.key');
     knowledgeService = new KnowledgeService(supabaseClient as any);
     mockProvider.getProvider.mockReturnValue(mockEmbeddingProvider);
+    mockSupabase.functions.invoke.mockResolvedValue({ data: {}, error: null });
   });
 
   it('should handle document upload and initiate processing', async () => {
@@ -94,6 +98,7 @@ describe('KnowledgeService', () => {
     expect(mockSupabase.insert).toHaveBeenCalledWith(expect.objectContaining({
       clinic_id: clinicId,
       uploaded_by: userId,
+      filename: 'test.txt',
       original_filename: 'test.txt',
       storage_path: `${clinicId}/mock-uuid.txt`,
       upload_status: 'success',
@@ -117,6 +122,32 @@ describe('KnowledgeService', () => {
     await expect(knowledgeService.handleUpload({ file, clinicId, userId }))
       .rejects
       .toThrow('Failed to upload file to storage: Storage access denied');
+  });
+
+  it('processes the document in-process when the Edge Function is unavailable', async () => {
+    const file = new File(['معلومة عربية عن تنظيف الأسنان'], 'clinic.txt', { type: 'text/plain' });
+    const clinicId = 'test-clinic-id';
+    const documentId = 'doc-id-123';
+    mockSupabase.storage.from('knowledge_documents').upload.mockResolvedValue({ data: {}, error: null });
+    mockSupabase.single
+      .mockResolvedValueOnce({ data: { id: documentId, clinic_id: clinicId }, error: null })
+      .mockResolvedValueOnce({ data: { clinic_id: clinicId }, error: null });
+    mockSupabase.functions.invoke.mockResolvedValue({ data: null, error: new Error('function missing') });
+    mockDocParser.extractTextFromBuffer.mockResolvedValue('معلومة عربية عن تنظيف الأسنان');
+    mockDocParser.chunkText.mockReturnValue(['معلومة عربية عن تنظيف الأسنان']);
+    mockEmbeddingProvider.embed.mockResolvedValue({ embedding: [0.1, 0.2, 0.3] });
+    mockSupabase.insert
+      .mockReturnValueOnce(mockSupabase)
+      .mockResolvedValueOnce({ error: null });
+
+    await knowledgeService.handleUpload({ file, clinicId, userId: 'user-id' });
+
+    expect(mockEmbeddingProvider.embed).toHaveBeenCalledWith('معلومة عربية عن تنظيف الأسنان');
+    expect(mockSupabase.from).toHaveBeenCalledWith('clinic_ai_knowledge');
+    expect(mockSupabase.insert).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ embedding_vector: [0.1, 0.2, 0.3] }),
+    ]));
+    expect(mockSupabase.update).toHaveBeenCalledWith(expect.objectContaining({ processing_status: 'indexed', chunk_count: 1 }));
   });
 
   it('should clean up storage if database insert fails', async () => {

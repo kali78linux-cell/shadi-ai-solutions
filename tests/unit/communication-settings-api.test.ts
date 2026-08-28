@@ -4,6 +4,9 @@ import { GET, PUT } from '@/app/api/clinic/communication-settings/route';
 // Mock clinicAuthorization
 const mockAuth = vi.hoisted(() => ({
   authorizeClinicRequest: vi.fn(),
+  roleDenied: vi.fn(() => null),
+  ADMIN_ROLES: ['owner','manager'],
+  DATA_ROLES: ['owner','manager','doctor','receptionist','staff'],
 }));
 vi.mock('@/lib/services/clinicAuthorization', () => mockAuth);
 

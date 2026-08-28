@@ -8,7 +8,14 @@ const mockBookingService = vi.hoisted(() => ({
   findOrCreatePatient: vi.fn(),
   createBooking: vi.fn(),
 }));
-vi.mock('@/lib/services/bookingService', () => mockBookingService);
+// Preserve the real isValidBookingPhone (route now requires phone) while
+// stubbing the booking-execution functions.
+vi.mock('@/lib/services/bookingService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/services/bookingService')>()),
+  getAvailableSlots: mockBookingService.getAvailableSlots,
+  findOrCreatePatient: mockBookingService.findOrCreatePatient,
+  createBooking: mockBookingService.createBooking,
+}));
 
 // Mock logging
 const mockLogging = vi.hoisted(() => ({ logEvent: vi.fn() }));
@@ -138,6 +145,7 @@ describe('POST /api/booking', () => {
       providerId: '22222222-2222-2222-2222-222222222222',
       service: 'Dental Cleaning',
       serviceId: undefined,
+      conversationId: null,
       date: '2026-07-20',
       time: '09:00',
       patientId: 'patient-1',
@@ -182,6 +190,20 @@ describe('POST /api/booking', () => {
 
     expect(res.status).toBe(409);
     expect(body.error).toContain('no longer available');
+  });
+
+  it('passes a chat conversation ID through to booking persistence', async () => {
+    mockBookingService.findOrCreatePatient.mockResolvedValue('patient-1');
+    mockBookingService.createBooking.mockResolvedValue({ id: 'appt-chat', scheduled_at: '2026-07-20T09:00:00.000Z', status: 'tentative' });
+    const conversationId = '77777777-7777-7777-7777-777777777777';
+
+    const res = await bookingPOST(makeRequest('http://localhost/api/booking', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...validBody, conversation_id: conversationId }),
+    }));
+
+    expect(res.status).toBe(201);
+    expect(mockBookingService.createBooking).toHaveBeenCalledWith(expect.objectContaining({ conversationId }));
   });
 
   it('returns 400 for invalid input', async () => {

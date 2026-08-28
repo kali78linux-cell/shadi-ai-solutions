@@ -9,6 +9,7 @@ const mockSupabaseAdmin = vi.hoisted(() => ({
     insert: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
+    is: vi.fn().mockReturnThis(),
     ilike: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn().mockReturnThis(),
@@ -56,6 +57,7 @@ describe('Booking communications integration', () => {
     mockSupabaseAdmin.supabaseAdmin.insert.mockReturnValue(mockSupabaseAdmin.supabaseAdmin);
     mockSupabaseAdmin.supabaseAdmin.update.mockReturnValue(mockSupabaseAdmin.supabaseAdmin);
     mockSupabaseAdmin.supabaseAdmin.eq.mockReturnValue(mockSupabaseAdmin.supabaseAdmin);
+    mockSupabaseAdmin.supabaseAdmin.is.mockReturnValue(mockSupabaseAdmin.supabaseAdmin);
     mockSupabaseAdmin.supabaseAdmin.ilike.mockReturnValue(mockSupabaseAdmin.supabaseAdmin);
     mockSupabaseAdmin.supabaseAdmin.limit.mockReturnValue(mockSupabaseAdmin.supabaseAdmin);
     mockSupabaseAdmin.supabaseAdmin.order.mockReturnValue(mockSupabaseAdmin.supabaseAdmin);
@@ -133,7 +135,7 @@ describe('Booking communications integration', () => {
     const result = await confirmPublicBooking({ clinicId: CLINIC, appointmentId: APPT, token: TOKEN });
 
     expect(result.status).toBe('confirmed');
-    expect(mockSupabaseAdmin.supabaseAdmin.from).toHaveBeenCalledWith('notifications');
+    expect(mockSupabaseAdmin.supabaseAdmin.from).toHaveBeenCalledWith('notification_queue');
     expect(mockLogging.logEvent).toHaveBeenCalledWith('booking_confirmation_communication_scheduled', expect.any(Object));
   });
 

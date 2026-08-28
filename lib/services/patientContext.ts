@@ -21,6 +21,13 @@ export type PatientContext = {
   urgency: '' | 'low' | 'normal' | 'high' | 'critical';
   requested_need: string;
   likely_specialty: string;
+  /**
+   * ROOT-CAUSE FIX («بدي اعمل تقويم» with no orthodontics service): Arabic
+   * label of a specialty the patient named that THIS clinic has no service
+   * for. Sticky for the conversation; blocks fake booking recommendations and
+   * tells the AI to confirm availability with reception instead.
+   */
+  specialty_without_service: string;
   recommended_service: string;
   recommended_provider: string;
   informed_pricing_visible: boolean;
@@ -41,6 +48,7 @@ export const EMPTY_PATIENT_CONTEXT: PatientContext = {
   urgency: '',
   requested_need: '',
   likely_specialty: '',
+  specialty_without_service: '',
   recommended_service: '',
   recommended_provider: '',
   informed_pricing_visible: false,

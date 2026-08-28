@@ -2,6 +2,7 @@ import { detectConversationIntelligence, type ConversationIntelligence, type Con
 import { classifyIntent, SEMANTIC_INTENTS, type SemanticIntent } from '@/lib/ai/intentClassifier';
 import { EMPTY_PATIENT_CONTEXT, loadPatientContext, savePatientContext, mergePatientContext, type PatientContext } from './patientContext';
 import { createInitialState, transitionConversationState as transitConvoState, persistConversationState, loadConversationState, mapToLegacyConversationState, type ConversationStateDetail } from './conversationStateMachine';
+import { reasonServiceProvider } from './receptionistReasoning';
 
 export type IntelligenceClient = {
   from(table: string): any;
@@ -120,10 +121,29 @@ export async function analyzeAndPersistMessage(client: IntelligenceClient, param
       trigger: (semantic.entities?.trigger as string) || existingCtx.trigger,
       urgency: ((semantic.entities?.urgency as PatientContext['urgency']) || existingCtx.urgency || (intelligence.urgency === 'critical' ? 'critical' : intelligence.urgency)),
       requested_need: (semantic.entities?.requested_service as string) || (intelligence.appointment?.requestedService as string) || existingCtx.requested_need,
+      likely_specialty: (semantic.entities?.requested_specialty as string) || existingCtx.likely_specialty,
     });
 
     const fallback = createInitialState(patientContext);
     convoState = await loadConversationState(params.clinicId, params.conversationId, fallback);
+
+    // Resolve concrete clinic resources only after we know what the patient
+    // needs. `reasonServiceProvider` always scopes its queries by clinic_id,
+    // so a conversation can never receive a Demo/other-clinic recommendation.
+    // A recommendation is valid only when both IDs are real clinic resources.
+    if (patientContext.problem.trim().length > 1) {
+      const recommendation = await reasonServiceProvider(params.clinicId, patientContext);
+      if (recommendation.recommendedServiceId && recommendation.recommendedProviderId) {
+        convoState.recommended_service_id = recommendation.recommendedServiceId;
+        convoState.recommended_provider_id = recommendation.recommendedProviderId;
+        patientContext = mergePatientContext(patientContext, {
+          recommended_service: recommendation.recommendedServiceName ?? '',
+          recommended_provider: recommendation.recommendedProviderName ?? '',
+        });
+      }
+    }
+
+    convoState.context = patientContext;
     convoState = transitConvoState({
       intent: semantic.intent,
       patientText: params.text,
@@ -132,6 +152,21 @@ export async function analyzeAndPersistMessage(client: IntelligenceClient, param
       patientRequestsHuman: semantic.intent === SEMANTIC_INTENTS.HUMAN_HANDOFF,
     });
     convoState.context = patientContext;
+
+    // The detailed recommendation state is entered only after deterministic
+    // service/provider matching succeeds. A booking request still follows the
+    // state machine's confirmation guard above.
+    if (
+      convoState.recommended_service_id &&
+      convoState.recommended_provider_id &&
+      semantic.intent !== SEMANTIC_INTENTS.APPOINTMENT_BOOKING &&
+      !convoState.patient_confirmed_booking &&
+      convoState.state !== 'BOOKING' &&
+      convoState.state !== 'AWAITING_BOOKING_CONFIRMATION'
+    ) {
+      convoState.state = 'RECOMMENDING_PROVIDER';
+      convoState.ready_for_recommendation = true;
+    }
   } catch (ctxErr) {
     // Don't let context/state failures break the core AI response.
     convoState = createInitialState(patientContext);

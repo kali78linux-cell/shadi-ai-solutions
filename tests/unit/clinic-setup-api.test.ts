@@ -1,18 +1,38 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockAuth = vi.hoisted(() => ({ authorizeClinicRequest: vi.fn() }));
+const mockAuth = vi.hoisted(() => ({ authorizeClinicRequest: vi.fn(), roleDenied: vi.fn(() => null), ADMIN_ROLES: ['owner','manager'], DATA_ROLES: ['owner','manager','doctor','receptionist','staff'] }));
 vi.mock('@/lib/services/clinicAuthorization', () => mockAuth);
 
 const mockLogging = vi.hoisted(() => ({ logEvent: vi.fn() }));
 vi.mock('@/lib/server/logging', () => mockLogging);
 
-const mockSupabaseServer = vi.hoisted(() => {
-  const q: Record<string, any> = {
-    from: vi.fn(), select: vi.fn(), insert: vi.fn(), update: vi.fn(), eq: vi.fn(), order: vi.fn(), single: vi.fn(), upsert: vi.fn(), delete: vi.fn(), in: vi.fn(), is: vi.fn(),
+// These routes were unified onto the service-role admin client, so the test
+// harness must mock the real dependency (@/lib/supabase/admin) rather than the
+// legacy cookie-based server client. The routes issue several DISTINCT queries
+// per request (clinic, providers, services, schedules, assignments), each ending
+// in a different terminal method (.single/.is/.in/.eq), so the mock returns a
+// fresh chainable+thenable builder per .from(table) whose resolved {data,error}
+// is looked up by table. This models the real Supabase chain faithfully.
+const mockSupabaseAdmin = vi.hoisted(() => {
+  const rows: Record<string, any> = {};
+  const CHAIN_METHODS = ['select', 'insert', 'update', 'upsert', 'delete', 'eq', 'neq', 'is', 'in', 'or', 'order', 'limit', 'single'];
+  function makeBuilder(): Record<string, any> {
+    const b: Record<string, any> = {};
+    for (const m of CHAIN_METHODS) b[m] = vi.fn(() => b); // chainable: every method returns the same builder
+    // Thenable: awaiting the result of any terminal call resolves to the row for
+    // the table that was selected by the most recent .from(table).
+    b.then = (resolve: (v: unknown) => void) => resolve(rows.__current ?? { data: [], error: null });
+    return b;
+  }
+  const supabaseAdmin = {
+    from: vi.fn((table: string) => {
+      rows.__current = rows[table] ?? { data: [], error: null };
+      return makeBuilder();
+    }),
   };
-  return { createSupabaseServerClient: () => q };
+  return { supabaseAdmin, rows };
 });
-vi.mock('@/lib/supabase/server', () => mockSupabaseServer);
+vi.mock('@/lib/supabase/admin', () => mockSupabaseAdmin);
 
 import { GET as getProfile, PUT as putProfile } from '@/app/api/clinic/profile/route';
 import { GET as getSetupStatus } from '@/app/api/clinic/setup-status/route';
@@ -29,25 +49,21 @@ function jsonBody(data: unknown): RequestInit {
   return { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(data) };
 }
 
-function resetChain() {
-  const q = mockSupabaseServer.createSupabaseServerClient();
-  q.from.mockReturnValue(q);
-  q.select.mockReturnValue(q);
-  q.eq.mockReturnValue(q);
-  q.order.mockResolvedValue({ data: [], error: null });
-  q.single.mockResolvedValue({ data: { id: CLINIC_A, name: 'Test Clinic', phone: '123', address: 'Addr', website: null, slug: 'test', created_at: '2026-01-01', updated_at: '2026-01-01' }, error: null });
-  q.upsert.mockResolvedValue({ error: null });
-  q.delete.mockReturnValue(q);
-  q.insert.mockResolvedValue({ error: null });
-  q.in.mockResolvedValue({ data: [], error: null });
-  q.is.mockResolvedValue({ data: [], error: null });
-  q.update.mockReturnValue(q);
+const clinicRow = { id: CLINIC_A, name: 'Test Clinic', phone: '123', address: 'Addr', website: null, slug: 'test', created_at: '2026-01-01', updated_at: '2026-01-01' };
+
+function resetRows() {
+  const rows = mockSupabaseAdmin.rows;
+  rows.clinics = { data: clinicRow, error: null };
+  rows.providers = { data: [], error: null };
+  rows.clinic_services = { data: [], error: null };
+  rows.provider_schedules = { data: [], error: null };
+  rows.provider_services = { data: [], error: null };
 }
 
 describe('Clinic Profile API', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    resetChain();
+    resetRows();
     mockAuth.authorizeClinicRequest.mockResolvedValue({ authorized: true, user: { id: 'user-1' }, role: 'owner' });
   });
 
@@ -76,8 +92,7 @@ describe('Clinic Profile API', () => {
   });
 
   it('returns 404 when clinic not found', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
-    q.single.mockResolvedValue({ data: null, error: { message: 'not found' } });
+    mockSupabaseAdmin.rows.clinics = { data: null, error: { message: 'not found' } };
     const res = await getProfile(makeRequest(`http://localhost/api/clinic/profile?clinic_id=${CLINIC_A}`));
     expect(res.status).toBe(404);
   });
@@ -89,8 +104,9 @@ describe('Clinic Profile API', () => {
       address: '123 Main St',
       website: 'https://example.com',
     })));
+    const body = await res.json();
     expect(res.status).toBe(200);
-    expect(res.json).toBeDefined();
+    expect(body.data.name).toBe('Test Clinic');
   });
 
   it('rejects invalid profile payload', async () => {
@@ -112,18 +128,11 @@ describe('Clinic Profile API', () => {
 describe('Clinic Setup Status API', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    resetChain();
+    resetRows();
     mockAuth.authorizeClinicRequest.mockResolvedValue({ authorized: true, user: { id: 'user-1' }, role: 'owner' });
   });
 
   it('returns incomplete when no providers/services exist', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
-    // Clinic exists
-    q.single.mockResolvedValue({ data: { id: CLINIC_A, name: 'Test', phone: '123', address: 'Addr', website: null }, error: null });
-    // Make eq chainable, is is the terminal for providers and services queries
-    q.eq.mockReturnValue(q);
-    q.is.mockResolvedValue({ data: [], error: null });
-
     const res = await getSetupStatus(makeRequest(`http://localhost/api/clinic/setup-status?clinic_id=${CLINIC_A}`));
     const body = await res.json();
     expect(res.status).toBe(200);
@@ -133,20 +142,11 @@ describe('Clinic Setup Status API', () => {
   });
 
   it('returns ready when all requirements are satisfied', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
-    // Clinic exists with full profile
-    q.single.mockResolvedValue({ data: { id: CLINIC_A, name: 'Test', phone: '123', address: 'Addr', website: null }, error: null });
-    // Providers exist
-    q.is.mockResolvedValue({ data: [{ id: PROVIDER }], error: null });
-    // Services exist
-    q.eq.mockResolvedValue({ data: [{ id: SERVICE }], error: null });
-    // Schedules exist (enabled)
-    q.in.mockResolvedValue({ data: [{ provider_id: PROVIDER }], error: null });
-    // Assignments exist and valid
-    q.from.mockReturnValue(q);
-    q.select.mockReturnValue(q);
-    q.eq.mockReturnValue(q);
-    q.in.mockResolvedValue({ data: [{ provider_id: PROVIDER, service_id: SERVICE }], error: null });
+    const rows = mockSupabaseAdmin.rows;
+    rows.providers = { data: [{ id: PROVIDER }], error: null };
+    rows.clinic_services = { data: [{ id: SERVICE, active: true }], error: null };
+    rows.provider_schedules = { data: [{ provider_id: PROVIDER, enabled: true }], error: null };
+    rows.provider_services = { data: [{ provider_id: PROVIDER, service_id: SERVICE }], error: null };
 
     const res = await getSetupStatus(makeRequest(`http://localhost/api/clinic/setup-status?clinic_id=${CLINIC_A}`));
     const body = await res.json();
@@ -167,8 +167,7 @@ describe('Clinic Setup Status API', () => {
   });
 
   it('returns 404 when clinic not found', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
-    q.single.mockResolvedValue({ data: null, error: { message: 'not found' } });
+    mockSupabaseAdmin.rows.clinics = { data: null, error: { message: 'not found' } };
     const res = await getSetupStatus(makeRequest(`http://localhost/api/clinic/setup-status?clinic_id=${CLINIC_A}`));
     expect(res.status).toBe(404);
   });

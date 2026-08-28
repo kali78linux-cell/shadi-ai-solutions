@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { RateLimiter } from '@/lib/services/gateway/security/rate-limiter';
-import { receivePatientMessage } from '@/lib/services/messageService';
+import { receivePatientMessage, listMessagesForConversation } from '@/lib/services/messageService';
+import { logEvent } from '@/lib/server/logging';
 import { authorizeClinicRequest } from '@/lib/services/clinicAuthorization';
 import { createConversation, getConversationById } from '@/lib/services/conversationService';
 import { streamAndRecordResponse } from '@/lib/ai/streamingOrchestrator';
 import { getProviderHealth } from '@/lib/ai/provider';
 import { getSupabaseEnvConfig } from '@/lib/config';
-import { appendDemoMessage, createDemoConversation, getDemoMessages } from '@/lib/demoState';
+import { appendDemoMessage, createDemoConversation, getDemoMessages, demoFallbackAllowed } from '@/lib/demoState';
 
 const MAX_MESSAGE_LENGTH = 4096;
 const limiter = new RateLimiter(20, 60 * 1000); // 20 requests per minute
@@ -29,18 +30,32 @@ export async function GET(req: Request) {
     }
 
     const config = getSupabaseEnvConfig();
-    if (!config.isConfigured) {
+    if (!config.isConfigured && demoFallbackAllowed()) {
       return NextResponse.json({ data: getDemoMessages(conversationId) });
     }
 
     const authorization = await authorizeClinicRequest(req, clinicId);
     if (!authorization.authorized) {
+      logEvent('authorization_denied', {
+        route: 'ai_messages_get_history',
+        clinic_id: clinicId,
+        reason: authorization.status === 401 ? 'unauthorized' : 'forbidden',
+      }, 'warn');
       return NextResponse.json({ error: authorization.status === 401 ? 'Unauthorized' : 'Forbidden' }, { status: authorization.status });
     }
 
-    return NextResponse.json({ data: [] });
+    // ROOT-CAUSE FIX: this route previously returned `{ data: [] }` — a stub —
+    // so refreshing the authenticated chat ALWAYS lost its history. Return the
+    // real transcript. listMessagesForConversation scopes by BOTH the
+    // conversation id AND the authorized clinic id (IDOR-safe).
+    const messages = await listMessagesForConversation(conversationId, clinicId);
+    return NextResponse.json({ data: messages });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Failed to load history' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Failed to load history';
+    logEvent('ai_messages_get_error', { error: message }, 'error');
+    // A missing conversation surfaces as a Postgres error from listMessagesForConversation's
+    // upstream ownership check — treat known not-found shapes as 404, everything else 500.
+    return NextResponse.json({ error: 'تعذر تحميل سجل المحادثة' }, { status: 500 });
   }
 }
 
@@ -53,7 +68,7 @@ export async function POST(req: Request) {
     }
 
     const config = getSupabaseEnvConfig();
-    if (!config.isConfigured) {
+    if (!config.isConfigured && demoFallbackAllowed()) {
       const conv = createDemoConversation({ clinic_id: parsed.data.clinic_id, session_id: `demo:${Date.now()}` });
       const userMessage = appendDemoMessage({ conversation_id: conv.id, clinic_id: parsed.data.clinic_id, role: 'patient', content: parsed.data.text });
       const assistantMessage = appendDemoMessage({ conversation_id: conv.id, clinic_id: parsed.data.clinic_id, role: 'assistant', content: 'AI runtime is not configured. Please configure an AI provider (OpenAI, Anthropic, or Ollama) in the environment.' });

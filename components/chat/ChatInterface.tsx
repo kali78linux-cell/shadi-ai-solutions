@@ -1,6 +1,8 @@
 'use client';
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { freshConversationState, conversationStorageKeysToPurge } from '@/lib/chat/conversationReset';
+import { applyPendingBookingContext, type PendingBookingContext, type BookingUiProjection } from '@/lib/ai/bookingContextBridge';
 
 type ChatMessage = {
   id?: string;
@@ -11,6 +13,13 @@ type ChatMessage = {
 type Props = {
   clinicId?: string;
   initialConversationId?: string | null;
+  /** Render in a full-height panel (floating widget) instead of a tall card. */
+  embedded?: boolean;
+  /**
+   * Explicit API mode. NEVER inferred from the identifier shape (that caused
+   * anonymous visitors to hit the session-protected route → 401 everywhere).
+   * Public chat pages/widgets leave the default 'public'.
+   */
 };
 
 const STORAGE_KEY_PREFIX = 'dentalai_chat_conv_';
@@ -23,7 +32,7 @@ const SUGGESTED_QUESTIONS = [
   'ما أوقات الدوام؟',
 ];
 
-export default function ChatInterface({ clinicId = 'demo', initialConversationId = null }: Props) {
+export default function ChatInterface({ clinicId = '', initialConversationId = null, embedded = false }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [conversationId, setConversationId] = useState<string | null>(initialConversationId);
@@ -44,6 +53,8 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
   const [providers, setProviders] = useState<any[]>([]);
   const [selectedService, setSelectedService] = useState<string | null>(null);
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null);
+  const [recommendedServiceId, setRecommendedServiceId] = useState<string | null>(null);
+  const [recommendedProviderId, setRecommendedProviderId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [slots, setSlots] = useState<string[]>([]);
   const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
@@ -73,6 +84,7 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
   const [rescheduleResult, setRescheduleResult] = useState<any | null>(null);
 
   const isUuid = /^[0-9a-fA-F-]{36}$/.test(clinicId);
+const clinicQueryField = isUuid ? 'clinic_id' : 'clinic_slug';
   const storageKey = `${STORAGE_KEY_PREFIX}${clinicId}`;
 
   // Scroll to bottom on new messages
@@ -82,9 +94,15 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
 
   // Load clinic info + welcome message
   useEffect(() => {
+    if (!clinicId) return;
     async function loadClinicInfo() {
       try {
-        const res = await fetch(`/api/booking/clinic?slug=${encodeURIComponent(clinicId)}`);
+        // resolvePublicClinic accepts either identifier — query with the right key
+        // so dashboard-originated UUID links ALSO resolve the real clinic name.
+        const query = isUuid
+          ? `clinic_id=${encodeURIComponent(clinicId)}`
+          : `slug=${encodeURIComponent(clinicId)}`;
+        const res = await fetch(`/api/booking/clinic?${query}`);
         if (res.ok) {
           const payload = await res.json();
           setClinicName(payload?.data?.name ?? null);
@@ -94,8 +112,7 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
         // Non-fatal — fallback welcome below
       }
     }
-    if (!isUuid) void loadClinicInfo();
-    else setPublicClinicId(clinicId);
+    void loadClinicInfo();
   }, [clinicId, isUuid]);
 
   // Load conversation history on mount
@@ -107,10 +124,11 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
       const effectiveConvId = conversationId ?? savedConvId;
 
       if (effectiveConvId) {
-        const base = isUuid ? '/api/ai/messages' : '/api/public/ai/messages';
+        // Root-fix: visitors ALWAYS use the public route. No endpoint guessing by identifier shape.
+      const base = '/api/public/ai/messages';
         const params = isUuid
           ? `conversation_id=${effectiveConvId}&clinic_id=${clinicId}`
-          : `conversation_id=${effectiveConvId}&clinic_slug=${encodeURIComponent(clinicId)}`;
+          : `conversation_id=${effectiveConvId}&${clinicQueryField}=${encodeURIComponent(clinicId)}`;
         try {
           const response = await fetch(`${base}?${params}`);
           if (response.ok) {
@@ -124,6 +142,15 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
               })));
               setConversationId(effectiveConvId);
               setShowSuggested(false);
+              // STEP 7: restore canonical booking state into the UI after reload
+              // (server state wins over stale localStorage; no invented slots).
+              if (payload?.booking_context?.recommended_service_id) {
+                setRecommendedServiceId(payload.booking_context.recommended_service_id);
+              }
+              if (payload?.booking_context?.recommended_provider_id) {
+                setRecommendedProviderId(payload.booking_context.recommended_provider_id);
+              }
+              applyBookingContextToUi(payload?.booking_context ?? null);
               setIsLoadingHistory(false);
               return;
             }
@@ -183,10 +210,11 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
     setShowSuggested(false);
 
     try {
-      const base = isUuid ? '/api/ai/messages' : '/api/public/ai/messages';
+      // Root-fix: visitors ALWAYS use the public route. No endpoint guessing by identifier shape.
+      const base = '/api/public/ai/messages';
       const payloadBody = isUuid
         ? { clinic_id: clinicId, conversation_id: conversationId, text: trimmed, stream: false }
-        : { clinic_slug: clinicId, conversation_id: conversationId, text: trimmed, stream: false };
+        : { [clinicQueryField]: clinicId, conversation_id: conversationId, text: trimmed, stream: false };
 
       const response = await fetch(base, {
         method: 'POST',
@@ -194,9 +222,44 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
         body: JSON.stringify(payloadBody),
       });
 
-      const payload = await response.json();
+      // Parse body safely (may be non-JSON). We never blindly assume JSON.
+      let payload: any = {};
+      try {
+        payload = await response.json();
+      } catch {
+        payload = { error: 'Unreadable server response' };
+      }
+
       if (!response.ok) {
-        // AI unavailable — show friendly message, not raw error
+        // Log the REAL error on the client for diagnosis (not just a friendly fallback).
+        console.warn('Chat AI request failed:', response.status, payload?.error ?? response.statusText);
+
+        // Distinguish "clinic not found" from a generic AI/provider error.
+        const errText = String(payload?.error ?? '').toLowerCase();
+        const isClinicNotFound =
+          response.status === 404 && (errText.includes('clinic not found') || errText.includes('conversation not found'));
+
+        if (isClinicNotFound) {
+          setAiUnavailable(true);
+          setMessages((current) => [
+            ...current,
+            { role: 'assistant', text: 'لم نستطع تحديد العيادة المطلوبة. تأكد من رابط العيادة ثم أعد المحاولة.' },
+          ]);
+          return;
+        }
+
+        // RATE LIMITED (429): an HONEST, specific message surfaced verbatim from
+        // the server. The old behavior lumped this into "المساعد غير متاح" which
+        // was both untrue and drove users to retry harder into the same limit.
+        if (response.status === 429) {
+          const rateLimitText = String(payload?.error ?? '') || 'أرسلت رسائل كثيرة بسرعة. انتظر قليلاً ثم أعد المحاولة.';
+          setMessages((current) => [...current, { role: 'assistant', text: rateLimitText }]);
+          return;
+        }
+
+        // SERVER/PROVIDER FAILURE (5xx and opaque errors): the ONE case where
+        // "المساعد غير متاح حاليًا" is truthful — a real upstream failure that
+        // is also logged server-side (public_ai_message_error) with its cause.
         setAiUnavailable(true);
         const friendly = 'عذرًا، يبدو أن المساعد غير متاح حاليًا. يمكنك ترك رقم هاتفك وسيتواصل معك فريق العيادة.';
         setMessages((current) => [...current, { role: 'assistant', text: friendly }]);
@@ -205,7 +268,18 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
 
       const assistantText = payload?.assistant_message?.content ?? payload?.assistant_message ?? 'تمت معالجة الرسالة.';
       setConversationId(payload?.conversation_id ?? conversationId);
+      // STEP 7: reflect canonical booking state into the UI projection when a
+      // recommendation/slot is present. The response's booking_context is the
+      // derived value we store in recommended ids so loadServicesForClinic can
+      // prefill from operating data.
+      if (payload?.booking_context?.recommended_service_id) {
+        setRecommendedServiceId(payload.booking_context.recommended_service_id);
+      }
+      if (payload?.booking_context?.recommended_provider_id) {
+        setRecommendedProviderId(payload.booking_context.recommended_provider_id);
+      }
       setMessages((current) => [...current, { role: 'assistant', text: assistantText }]);
+      applyBookingContextToUi(payload?.booking_context ?? null);
 
       // If assistant returned structured metadata suggesting booking intent, prepare services
       try {
@@ -223,9 +297,16 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
       } catch {
         // ignore — booking flow will re-fetch when user invokes it
       }
-    } catch {
+    } catch (err) {
+      // Network-level failure (offline / server unreachable) — DISTINCT from
+      // "assistant unavailable": the browser itself could not complete the
+      // request, so blaming the AI provider would be misleading.
+      console.warn('[ai chat] request threw:', err);
       setAiUnavailable(true);
-      setMessages((current) => [...current, { role: 'assistant', text: 'عذرًا، يبدو أن المساعد غير متاح حاليًا. يمكنك ترك رقم هاتفك وسيتواصل معك فريق العيادة.' }]);
+      setMessages((current) => [
+        ...current,
+        { role: 'assistant', text: 'تعذّر الاتصال بالخادم. تحقق من اتصالك بالإنترنت ثم أعد المحاولة.' },
+      ]);
     } finally {
       setIsSubmitting(false);
     }
@@ -241,8 +322,14 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
       const res = await fetch(`/api/booking/services?clinic_id=${cid}`);
       if (!res.ok) throw new Error('Failed to load services');
       const payload = await res.json();
-      setServices(payload?.data?.services ?? []);
-      if ((payload?.data?.services ?? []).length === 1) setSelectedService(payload.data.services[0].id);
+      const loadedServices = payload?.data?.services ?? [];
+      setServices(loadedServices);
+      const preferredService = loadedServices.find((service: any) => service.id === recommendedServiceId)?.id;
+      const serviceToSelect = preferredService ?? (loadedServices.length === 1 ? loadedServices[0].id : null);
+      if (serviceToSelect) {
+        setSelectedService(serviceToSelect);
+        await loadProvidersForService(serviceToSelect, recommendedProviderId);
+      }
     } catch (err: any) {
       setBookingError(err?.message ?? 'Failed to load services');
     }
@@ -257,6 +344,123 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
       void loadServicesForClinic();
     }
   }
+
+  // STEP 7 — Persist a Booking UI selection into the canonical conversation
+  // state (server-side). Never invents a slot: the server re-validates any slot
+  // against real availability. Non-fatal on failure (in-memory flow continues).
+  async function persistUiToConversation(patch: {
+    service_id?: string | null;
+    provider_id?: string | null;
+    date?: string | null;
+    slot?: string | null;
+    patient_name?: string;
+    phone?: string;
+    email?: string;
+    confirmed?: boolean;
+  }) {
+    if (!conversationId) return;
+    try {
+      const clinicKey = isUuid ? { clinic_id: clinicId } : { clinic_slug: clinicId };
+      await fetch('/api/public/ai/booking-context', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...clinicKey,
+          conversation_id: conversationId,
+          ...(patch.service_id ? { service_id: patch.service_id } : {}),
+          ...(patch.provider_id ? { provider_id: patch.provider_id } : {}),
+          ...(patch.date ? { date: patch.date } : {}),
+          ...(patch.slot ? { slot: patch.slot } : {}),
+          ...(patch.patient_name !== undefined ? { patient_name: patch.patient_name } : {}),
+          ...(patch.phone !== undefined ? { phone: patch.phone } : {}),
+          ...(patch.email !== undefined ? { email: patch.email } : {}),
+          ...(patch.confirmed ? { confirmed: true } : {}),
+        }),
+      });
+    } catch {
+      // non-fatal — the in-memory booking flow still works this turn
+    }
+  }
+
+  // STEP 7 — Reflect the canonical conversation booking state into the UI.
+  // The UI is a projection: server-verified service/provider ids and a real
+  // slot become the initial selections ONLY where the user hasn't chosen yet.
+  function applyBookingContextToUi(ctx: PendingBookingContext | null) {
+    if (!ctx) return;
+    const ui: BookingUiProjection = {
+      selectedService,
+      selectedProvider,
+      selectedDate,
+      selectedSlot,
+      showBookingSummary,
+      patientName,
+      patientPhone,
+      patientEmail,
+      bookingMode,
+    };
+    const next = applyPendingBookingContext(ui, ctx);
+    if (next.selectedService !== selectedService) setSelectedService(next.selectedService);
+    if (next.selectedProvider !== selectedProvider) setSelectedProvider(next.selectedProvider);
+    if (next.selectedDate !== selectedDate) setSelectedDate(next.selectedDate);
+    if (next.selectedSlot !== selectedSlot) setSelectedSlot(next.selectedSlot);
+    if (next.showBookingSummary) setShowBookingSummary(true);
+    if (next.patientName !== patientName) setPatientName(next.patientName);
+    if (next.patientPhone !== patientPhone) setPatientPhone(next.patientPhone);
+    if (next.patientEmail !== patientEmail) setPatientEmail(next.patientEmail);
+    if (next.bookingMode && !bookingMode) setBookingMode(true);
+  }
+
+  // NEW-CONVERSATION ISOLATION (root-cause fix): starts a genuinely fresh
+  // conversation — new conversation_id on the next message, fresh messages,
+  // fresh PatientContext/state-machine (server-side: new conversation row has
+  // empty metadata), and fresh booking context. The old conversation remains
+  // in the database and stays visible in the clinic dashboard history.
+  const startNewConversation = useCallback(() => {
+    const welcome = welcomeMessage
+      ?? (clinicName ? `أهلًا بك في ${clinicName} 👋\nأنا ${assistantName ?? 'موظفة الاستقبال الافتراضية'}. كيف يمكنني مساعدتك؟` : 'أهلًا بك 👋\nأنا موظفة الاستقبال الافتراضية. كيف يمكنني مساعدتك؟');
+    const fresh = freshConversationState(welcome);
+
+    setMessages(fresh.messages);
+    setConversationId(fresh.conversationId);
+    setShowSuggested(fresh.showSuggested);
+    setStatusMessage(fresh.statusMessage);
+    setAiUnavailable(fresh.aiUnavailable);
+    setBookingMode(fresh.bookingMode);
+    setBookingResult(fresh.bookingResult);
+    setBookingError(fresh.bookingError);
+    setShowBookingSummary(fresh.showBookingSummary);
+    setRecommendedServiceId(fresh.recommendedServiceId);
+    setRecommendedProviderId(fresh.recommendedProviderId);
+    setSelectedService(fresh.selectedService);
+    setSelectedProvider(fresh.selectedProvider);
+    setSelectedDate(fresh.selectedDate);
+    setSlots(fresh.slots);
+    setSelectedSlot(fresh.selectedSlot);
+    setPatientName(fresh.patientName);
+    setPatientPhone(fresh.patientPhone);
+    setPatientEmail(fresh.patientEmail);
+    setShowCancel(fresh.showCancel);
+    setCancelAppointmentId(fresh.cancelAppointmentId);
+    setCancelToken(fresh.cancelToken);
+    setCancelResult(fresh.cancelResult);
+    setCancelError(fresh.cancelError);
+    setShowReschedule(fresh.showReschedule);
+    setRescheduleAppointmentId(fresh.rescheduleAppointmentId);
+    setRescheduleToken(fresh.rescheduleToken);
+    setRescheduleResult(fresh.rescheduleResult);
+    setRescheduleError(fresh.rescheduleError);
+    lastSentRef.current = null;
+
+    // Purge this device's pointers (conversation id + booking context).
+    // The conversation itself is NOT deleted server-side.
+    try {
+      for (const key of conversationStorageKeysToPurge(storageKey)) {
+        localStorage.removeItem(key);
+      }
+    } catch {
+      // localStorage unavailable (private mode) — state reset above is enough.
+    }
+  }, [welcomeMessage, clinicName, assistantName, storageKey]);
 
   // Restore bookingMode from localStorage (so refresh preserves booking context)
   useEffect(() => {
@@ -284,7 +488,7 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookingMode, publicClinicId]);
 
-  async function loadProvidersForService(serviceId?: string) {
+  async function loadProvidersForService(serviceId?: string, preferredProviderId?: string | null) {
     setBookingError(null);
     const cid = publicClinicId ?? (isUuid ? clinicId : null);
     if (!cid) return setBookingError('Unable to resolve clinic for booking');
@@ -295,8 +499,11 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
       const res = await fetch(url.toString());
       if (!res.ok) throw new Error('Failed to load providers');
       const payload = await res.json();
-      setProviders(payload?.data?.providers ?? []);
-      if ((payload?.data?.providers ?? []).length === 1) setSelectedProvider(payload.data.providers[0].id);
+      const loadedProviders = payload?.data?.providers ?? [];
+      setProviders(loadedProviders);
+      const preferredProvider = loadedProviders.find((provider: any) => provider.id === preferredProviderId)?.id;
+      if (preferredProvider) setSelectedProvider(preferredProvider);
+      else if (loadedProviders.length === 1) setSelectedProvider(loadedProviders[0].id);
     } catch (err: any) {
       setBookingError(err?.message ?? 'Failed to load providers');
     }
@@ -343,6 +550,7 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
         provider_id: selectedProvider,
         service: services.find((s) => s.id === selectedService)?.name ?? (selectedService ?? 'Service'),
         service_id: selectedService ?? undefined,
+        conversation_id: conversationId,
         date: date,
         time: time,
         patient_name: patientName,
@@ -376,6 +584,14 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
   function handleSlotSelect(slot: string) {
     setSelectedSlot(slot);
     setShowBookingSummary(true);
+    // STEP 7: persist the real slot + provider into canonical conversation state.
+    const [dateFromSlot] = slot.split('T');
+    void persistUiToConversation({
+      service_id: selectedService,
+      provider_id: selectedProvider,
+      date: dateFromSlot || selectedDate,
+      slot,
+    });
   }
 
   function handleCancelRequest() {
@@ -407,12 +623,31 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
   }
 
   return (
-    <div className="flex min-h-[40rem] flex-col rounded-[2rem] border border-slate-800 bg-slate-900/80 shadow-xl shadow-slate-950/30">
-      <div className="rounded-t-[2rem] bg-slate-950/90 px-6 py-5">
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-300/80">
-          {assistantName ? `${assistantName} — ` : ''}محادثة AI
-        </p>
-        {clinicName && <p className="mt-1 text-xs text-slate-400">{clinicName}</p>}
+    <div
+      className={`flex flex-col rounded-[2rem] border border-slate-800 bg-slate-900/80 shadow-xl shadow-slate-950/30 ${
+        embedded ? 'h-full w-full' : 'min-h-[40rem]'
+      }`}
+    >
+      <div className="flex items-start justify-between rounded-t-[2rem] bg-slate-950/90 px-6 py-5">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-[0.2em] text-cyan-300/80">
+            {assistantName ? `${assistantName} — ` : ''}محادثة AI
+          </p>
+          {clinicName && <p className="mt-1 text-xs text-slate-400">{clinicName}</p>}
+        </div>
+        {/* New Conversation: full isolation from the previous session. */}
+        {!isLoadingHistory && (
+          <button
+            type="button"
+            onClick={startNewConversation}
+            disabled={isSubmitting}
+            aria-label="بدء محادثة جديدة"
+            title="ابدأ محادثة جديدة — المحادثة الحالية تبقى محفوظة في السجل"
+            className="shrink-0 rounded-full border border-slate-700 bg-slate-900 px-4 py-2 text-xs font-semibold text-slate-200 transition hover:border-cyan-500/70 hover:text-white disabled:opacity-50"
+          >
+            + محادثة جديدة
+          </button>
+        )}
       </div>
       <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
         {statusMessage ? (
@@ -566,9 +801,9 @@ export default function ChatInterface({ clinicId = 'demo', initialConversationId
                   )}
 
                   <div className="grid grid-cols-1 gap-2">
-                    <input placeholder="الاسم *" value={patientName} onChange={(e) => setPatientName(e.target.value)} className="mt-2 w-full rounded-md bg-slate-800 px-3 py-2 text-slate-100" />
-                    <input placeholder="الهاتف (اختياري)" value={patientPhone} onChange={(e) => setPatientPhone(e.target.value)} className="w-full rounded-md bg-slate-800 px-3 py-2 text-slate-100" />
-                    <input placeholder="البريد الإلكتروني (اختياري)" value={patientEmail} onChange={(e) => setPatientEmail(e.target.value)} className="w-full rounded-md bg-slate-800 px-3 py-2 text-slate-100" />
+                    <input placeholder="الاسم *" value={patientName} onChange={(e) => { setPatientName(e.target.value); void persistUiToConversation({ patient_name: e.target.value }); }} className="mt-2 w-full rounded-md bg-slate-800 px-3 py-2 text-slate-100" />
+                    <input placeholder="الهاتف (اختياري)" value={patientPhone} onChange={(e) => { setPatientPhone(e.target.value); void persistUiToConversation({ phone: e.target.value }); }} className="w-full rounded-md bg-slate-800 px-3 py-2 text-slate-100" />
+                    <input placeholder="البريد الإلكتروني (اختياري)" value={patientEmail} onChange={(e) => { setPatientEmail(e.target.value); void persistUiToConversation({ email: e.target.value }); }} className="w-full rounded-md bg-slate-800 px-3 py-2 text-slate-100" />
                   </div>
 
                   <div className="flex gap-2">

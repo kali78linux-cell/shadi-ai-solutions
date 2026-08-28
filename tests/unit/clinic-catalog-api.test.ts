@@ -1,13 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockAuth = vi.hoisted(() => ({ authorizeClinicRequest: vi.fn() }));
+const mockAuth = vi.hoisted(() => ({ authorizeClinicRequest: vi.fn(), roleDenied: vi.fn(() => null), ADMIN_ROLES: ['owner','manager'], DATA_ROLES: ['owner','manager','doctor','receptionist','staff'] }));
 vi.mock('@/lib/services/clinicAuthorization', () => mockAuth);
 
 const mockLogging = vi.hoisted(() => ({ logEvent: vi.fn() }));
 vi.mock('@/lib/server/logging', () => mockLogging);
 
-// Shared chainable query builder mock.
-const mockSupabaseServer = vi.hoisted(() => {
+// Shared chainable query builder mock. Dashboard APIs use the server-only
+// service client after authorization, so this mirrors that real dependency.
+const mockSupabaseAdmin = vi.hoisted(() => {
   const q: Record<string, any> = {
     from: vi.fn(),
     select: vi.fn(),
@@ -17,9 +18,9 @@ const mockSupabaseServer = vi.hoisted(() => {
     order: vi.fn(),
     single: vi.fn(),
   };
-  return { createSupabaseServerClient: () => q };
+  return { supabaseAdmin: q };
 });
-vi.mock('@/lib/supabase/server', () => mockSupabaseServer);
+vi.mock('@/lib/supabase/admin', () => mockSupabaseAdmin);
 
 import { GET as getProviders, POST as postProvider } from '@/app/api/clinic/providers/route';
 import { PUT as putProvider, DELETE as deleteProvider } from '@/app/api/clinic/providers/[providerId]/route';
@@ -39,7 +40,7 @@ function jsonBody(data: unknown): RequestInit {
 }
 
 function resetChain() {
-  const q = mockSupabaseServer.createSupabaseServerClient();
+  const q = mockSupabaseAdmin.supabaseAdmin;
   q.from.mockReturnValue(q);
   q.select.mockReturnValue(q);
   q.insert.mockReturnValue(q);
@@ -60,7 +61,7 @@ describe('Provider management API', () => {
   });
 
   it('lists providers for an authorized clinic member', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
+    const q = mockSupabaseAdmin.supabaseAdmin;
     q.order.mockResolvedValue({ data: [providerRow], error: null });
     const res = await getProviders(makeRequest(`http://localhost/api/clinic/providers?clinic_id=${CLINIC_A}`));
     const body = await res.json();
@@ -75,7 +76,7 @@ describe('Provider management API', () => {
   });
 
   it('creates a provider and a default schedule row', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
+    const q = mockSupabaseAdmin.supabaseAdmin;
     q.single.mockResolvedValue({ data: providerRow, error: null });
     const res = await postProvider(makeRequest(`http://localhost/api/clinic/providers?clinic_id=${CLINIC_A}`, jsonBody({ name: 'Dr. Smith', title: 'Dentist', provider_type: 'dentist' })));
     const body = await res.json();
@@ -90,7 +91,7 @@ describe('Provider management API', () => {
   });
 
   it('updates a provider clinic-scoped', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
+    const q = mockSupabaseAdmin.supabaseAdmin;
     q.single.mockResolvedValue({ data: { ...providerRow, name: 'Dr. Renamed' }, error: null });
     const res = await putProvider(makeRequest(`http://localhost/api/clinic/providers/${PROVIDER}?clinic_id=${CLINIC_A}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Dr. Renamed' }) }));
     const body = await res.json();
@@ -105,7 +106,7 @@ describe('Provider management API', () => {
   });
 
   it('deletes a provider clinic-scoped (soft delete)', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
+    const q = mockSupabaseAdmin.supabaseAdmin;
     q.update.mockReturnValue(q);
     const res = await deleteProvider(makeRequest(`http://localhost/api/clinic/providers/${PROVIDER}?clinic_id=${CLINIC_A}`, { method: 'DELETE' }));
     expect(res.status).toBe(200);
@@ -120,7 +121,7 @@ describe('Service management API', () => {
   });
 
   it('lists services for an authorized clinic member', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
+    const q = mockSupabaseAdmin.supabaseAdmin;
     q.order.mockResolvedValue({ data: [serviceRow], error: null });
     const res = await getServices(makeRequest(`http://localhost/api/clinic/services?clinic_id=${CLINIC_A}`));
     const body = await res.json();
@@ -135,7 +136,7 @@ describe('Service management API', () => {
   });
 
   it('creates a service clinic-scoped', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
+    const q = mockSupabaseAdmin.supabaseAdmin;
     q.single.mockResolvedValue({ data: serviceRow, error: null });
     const res = await postService(makeRequest(`http://localhost/api/clinic/services?clinic_id=${CLINIC_A}`, jsonBody({ name: 'Cleaning', duration_minutes: 30, price: 100 })));
     const body = await res.json();
@@ -149,7 +150,7 @@ describe('Service management API', () => {
   });
 
   it('updates a service clinic-scoped', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
+    const q = mockSupabaseAdmin.supabaseAdmin;
     q.single.mockResolvedValue({ data: { ...serviceRow, duration_minutes: 45, price: 150 }, error: null });
     const res = await putService(makeRequest(`http://localhost/api/clinic/services/${SERVICE}?clinic_id=${CLINIC_A}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ duration_minutes: 45, price: 150 }) }));
     const body = await res.json();
@@ -164,7 +165,7 @@ describe('Service management API', () => {
   });
 
   it('deletes a service clinic-scoped (soft delete)', async () => {
-    const q = mockSupabaseServer.createSupabaseServerClient();
+    const q = mockSupabaseAdmin.supabaseAdmin;
     q.update.mockReturnValue(q);
     const res = await deleteService(makeRequest(`http://localhost/api/clinic/services/${SERVICE}?clinic_id=${CLINIC_A}`, { method: 'DELETE' }));
     expect(res.status).toBe(200);

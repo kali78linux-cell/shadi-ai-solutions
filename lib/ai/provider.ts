@@ -46,6 +46,11 @@ export function getProvider(id?: string) {
   return providers.values().next().value;
 }
 
+/** All registered providers in registration order — used for failover ordering. */
+export function listProviders(): AIProvider[] {
+  return Array.from(providers.values());
+}
+
 export function clearProviders() {
   providers.clear();
 }
@@ -65,6 +70,7 @@ function getProviderKeyEnv(providerId: string): string | null {
   switch (providerId) {
     case 'openai': return 'OPENAI_API_KEY';
     case 'anthropic': return 'ANTHROPIC_API_KEY';
+    case 'gemini': return 'GEMINI_API_KEY';
     case 'ollama': return 'OLLAMA_MODEL';
     default: return null;
   }

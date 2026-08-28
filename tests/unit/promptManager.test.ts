@@ -147,3 +147,127 @@ describe('Prompt Manager', () => {
     expect(prompt).not.toContain('Patient Context:');
   });
 });
+
+describe('Prompt Manager — receptionist grounding (no-hallucination behavior)', () => {
+  const settings: ClinicAISettings = { id: 's1', clinic_id: 'c1', assistant_name: 'Bot', tone: 'friendly', language: 'ar', created_at: '', updated_at: '' };
+
+  it('injects the real clinic profile and forbids location inference / invented facts', () => {
+    const prompt = buildPrompt(settings, 'وين العيادة؟', [], [], undefined, {
+      clinicInfo: { name: 'Demo Dental Clinic', address: 'Demo Street 12, Amman, Jordan', phone: '+970-' },
+    });
+    expect(prompt).toContain('Name: Demo Dental Clinic');
+    expect(prompt).toContain('Address: Demo Street 12, Amman, Jordan');
+    expect(prompt).toContain('NEVER infer the clinic location from the patient');
+    expect(prompt).toContain('NEVER invent a clinic name/address');
+  });
+
+  it('never invents descriptors/adjectives beyond the clinic data', () => {
+    const prompt = buildPrompt(settings, 'بدي اعمل زراعة', [], [], undefined, {
+      clinicInfo: { name: 'Demo' },
+      receptionistState: {
+        state: 'RECOMMENDING_PROVIDER',
+        recommended_service_id: null,
+        recommended_provider_id: null,
+        patient_confirmed_booking: false,
+        pending_question: '',
+        booking: { service_id: null, provider_id: null, slot: null, patient_name: null, phone: null, email: null },
+      },
+    });
+    expect(prompt).toContain('STRICT GROUNDING');
+    expect(prompt).toMatch(/متميز/); // the guard explicitly forbids this word
+    expect(prompt).toContain('NEVER add descriptive words like');
+  });
+
+  it('renders the REAL proposed slot so follow-up "أي ساعة؟" answers are grounded (not invented)', () => {
+    const prompt = buildPrompt(settings, 'أي ساعة متوفر؟', [], [], undefined, {
+      receptionistState: {
+        state: 'AWAITING_BOOKING_CONFIRMATION',
+        recommended_service_id: 'svc',
+        recommended_provider_id: 'p1',
+        patient_confirmed_booking: false,
+        pending_question: '',
+        booking: { service_id: 'svc', provider_id: 'p1', slot: '2026-09-04T13:30:00.000Z', patient_name: null, phone: null, email: null },
+      },
+    });
+    expect(prompt).toContain('REAL proposed slot');
+    expect(prompt).toContain('2026-09-04T13:30:00.000Z');
+    expect(prompt).toContain('NEVER invent another slot');
+  });
+});
+
+describe('Prompt Manager — STEP 4 source separation & anti-hallucination', () => {
+  const settings: ClinicAISettings = { id: 's1', clinic_id: 'c1', assistant_name: 'Bot', tone: 'friendly', language: 'ar', created_at: '', updated_at: '' };
+  const ctx = [
+    { id: 'chunk-1', document_id: 'doc-1', chunk_index: 0, content: 'قائمة الأسعار', similarity: 0.9, type: 'unstructured' as const, document: { id: 'doc-1', original_filename: 'pricing.txt', file_type: 'text', mime_type: 'text/plain' } },
+  ];
+  const citations = [{
+    documentId: 'doc-1', filename: 'pricing.txt', chunkId: 'chunk-1', chunkIndex: 0, pageNumber: null, confidenceScore: 0.4, content: 'قائمة الأسعار',
+  }];
+
+describe('Prompt Manager — STEP 5 Network Discovery Mode', () => {
+  const settings5: ClinicAISettings = {
+    id: 'settings-5',
+    clinic_id: 'clinic-1',
+    assistant_name: 'مساعد العيادة',
+    tone: 'friendly',
+    language: 'Arabic',
+    created_at: '',
+    updated_at: '',
+  };
+
+  const baseReceptionState = {
+    state: 'RECOMMENDING_PROVIDER' as const,
+    recommended_service_id: null,
+    recommended_provider_id: null,
+    patient_confirmed_booking: false,
+    pending_question: '',
+    booking: { service_id: null, provider_id: null, slot: null, patient_name: null, phone: null, email: null },
+  };
+
+  it('renders the per-turn discovery note ONLY when present (Clinic Reception Mode is the default)', () => {
+    const withGuidance = buildPrompt(settings5, 'وين عيادة ثانية؟', [], [], undefined, {
+      receptionistState: {
+        ...baseReceptionState,
+        discovery_guidance: 'Network Discovery Mode (this turn only): REAL directory matches: عيادة النور (نابلس) — 12.3 km.',
+      },
+    });
+    expect(withGuidance).toContain('Network Discovery Mode (this turn only)');
+    expect(withGuidance).toContain('عيادة النور');
+    expect(withGuidance).toContain('This clinic remains the default');
+
+    const withoutGuidance = buildPrompt(settings5, 'مرحبا', [], [], undefined, {
+      receptionistState: { ...baseReceptionState },
+    });
+    expect(withoutGuidance).not.toContain('Network Discovery Mode');
+  });
+});
+
+  it('injects the DATA SOURCE SEPARATION directive when context exists', () => {
+    const prompt = buildPrompt(settings, 'كم سعر التنظيف؟', [], ctx, citations, { confidenceThreshold: 0.7 });
+    expect(prompt).toContain('DATA SOURCE SEPARATION');
+    expect(prompt).toContain('ClinicFacts');
+    expect(prompt).toContain('OperatingData');
+    expect(prompt).toContain('General Dental Knowledge');
+    expect(prompt).toContain('patient_location is about the PATIENT');
+    expect(prompt).toContain('NEVER calculate availability, timezones, or slots');
+  });
+
+  it('injects the no-RAG variant when there is no context', () => {
+    const prompt = buildPrompt(settings, 'وين العيادة؟', [], [], undefined, { clinicInfo: { name: 'Demo' } });
+    expect(prompt).toContain('DATA SOURCE SEPARATION');
+    expect(prompt).toContain('none was retrieved for this turn');
+    expect(prompt).toContain('RAG / Clinic Knowledge');
+  });
+
+  it('forbids stating low-confidence RAG as a confirmed clinic fact', () => {
+    const prompt = buildPrompt(settings, 'كم سعر التنظيف؟', [], ctx, citations, { confidenceThreshold: 0.7 });
+    expect(prompt).toContain('Confidence is below the threshold');
+    expect(prompt).toContain('must NOT state it as a confirmed clinic fact');
+  });
+
+  it('never lets General Dental Knowledge become clinic policy/price/doctor/availability', () => {
+    const prompt = buildPrompt(settings, 'بدي زراعة', [], [], undefined, {});
+    expect(prompt).toMatch(/General Dental Knowledge: ONLY for educational answers/);
+    expect(prompt).toMatch(/final assessment is made by a dentist after an examination/);
+  });
+});

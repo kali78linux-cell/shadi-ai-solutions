@@ -54,3 +54,32 @@ export async function getAuthorizedClinicMember(req: Request, clinicId: string) 
     role: authorization.role,
   } as const;
 }
+
+/**
+ * Known clinic roles. The DB currently only contains 'owner', but these are
+ * the roles the system recognizes; unknown roles are treated as least-privilege.
+ */
+export const CLINIC_ROLES = ['owner', 'manager', 'doctor', 'receptionist', 'accountant', 'staff'] as const;
+export type ClinicRole = (typeof CLINIC_ROLES)[number];
+
+/** Roles allowed to perform administrative/mutating actions on clinic config. */
+export const ADMIN_ROLES: readonly string[] = ['owner', 'manager'];
+/** Roles allowed to READ operational clinic data (members of the clinic). */
+export const DATA_ROLES: readonly string[] = [...ADMIN_ROLES, 'doctor', 'receptionist', 'staff'];
+
+/**
+ * Role gate on top of membership: authenticated + member + role check.
+ * Returns a NextResponse-shaped rejection or null when allowed.
+ */
+export function roleDenied(
+  authorization: { authorized: boolean; status?: number; role?: string },
+  allowedRoles: readonly string[]
+): { authorized: false; status: 401 | 403 } | null {
+  if (!authorization.authorized) {
+    return { authorized: false, status: (authorization.status ?? 401) as 401 | 403 };
+  }
+  if (!allowedRoles.includes(authorization.role ?? '')) {
+    return { authorized: false, status: 403 };
+  }
+  return null;
+}

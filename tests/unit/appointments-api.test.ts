@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockAuth = vi.hoisted(() => ({ authorizeClinicRequest: vi.fn() }));
+const mockAuth = vi.hoisted(() => ({ authorizeClinicRequest: vi.fn(), roleDenied: vi.fn(() => null), ADMIN_ROLES: ['owner','manager'], DATA_ROLES: ['owner','manager','doctor','receptionist','staff'] }));
 vi.mock('@/lib/services/clinicAuthorization', () => mockAuth);
 
 const mockLogging = vi.hoisted(() => ({ logEvent: vi.fn() }));
@@ -14,8 +14,16 @@ const mockSupabase = vi.hoisted(() => {
 });
 vi.mock('@/lib/supabase', () => mockSupabase);
 
-const mockConfig = vi.hoisted(() => ({ getSupabaseEnvConfig: vi.fn() }));
+const mockConfig = vi.hoisted(() => ({
+  getSupabaseEnvConfig: vi.fn(() => ({
+    isConfigured: true,
+    supabaseUrl: 'https://example.supabase.co',
+    supabaseServiceRoleKey: 'test-service-role-key',
+  })),
+}));
 vi.mock('@/lib/config', () => mockConfig);
+
+vi.mock('@/lib/supabase/admin', () => ({ supabaseAdmin: mockSupabase.supabase }));
 
 const mockScheduling = vi.hoisted(() => ({ getCalendarRange: vi.fn() }));
 vi.mock('@/lib/services/scheduling', () => mockScheduling);
@@ -60,7 +68,11 @@ describe('Appointments API', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetChain();
-    mockConfig.getSupabaseEnvConfig.mockReturnValue({ isConfigured: true });
+    mockConfig.getSupabaseEnvConfig.mockReturnValue({
+      isConfigured: true,
+      supabaseUrl: 'https://example.supabase.co',
+      supabaseServiceRoleKey: 'test-service-role-key',
+    });
     mockAuth.authorizeClinicRequest.mockResolvedValue({ authorized: true, user: { id: 'user-1' }, role: 'owner' });
   });
 

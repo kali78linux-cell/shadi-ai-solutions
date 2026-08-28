@@ -21,6 +21,25 @@ export async function getConversationHistory(conversationId: string, limit = 10)
   return (data as Pick<Message, 'role' | 'content'>[]).reverse(); // Reverse to get chronological order
 }
 
+/**
+ * Full chronological transcript of one conversation (staff detail page +
+ * authenticated chat history restore). Scoped by clinic_id so a guessed
+ * conversation id from another tenant returns nothing.
+ */
+export async function listMessagesForConversation(
+  conversationId: string,
+  clinicId: string
+): Promise<Array<Pick<Message, 'id' | 'role' | 'content' | 'created_at'>>> {
+  const { data, error } = await supabaseAdmin
+    .from('messages')
+    .select('id, role, content, created_at')
+    .eq('conversation_id', conversationId)
+    .eq('clinic_id', clinicId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as Array<Pick<Message, 'id' | 'role' | 'content' | 'created_at'>>;
+}
+
 export async function receivePatientMessage(params: {
   clinicId: string;
   conversationId?: string | null;

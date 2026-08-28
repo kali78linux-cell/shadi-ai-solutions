@@ -35,6 +35,7 @@ describe('Knowledge document action API', () => {
   test('marks a document as deleted', async () => {
     const clinicUsersChain = {
       select: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: { role: 'owner' }, error: null }),
       eq: vi.fn().mockReturnThis(),
       is: vi.fn().mockReturnThis(),
       limit: vi.fn().mockReturnThis(),
@@ -59,6 +60,7 @@ describe('Knowledge document action API', () => {
   test('requeues a document for processing', async () => {
     const clinicUsersChain = {
       select: vi.fn().mockReturnThis(),
+      maybeSingle: vi.fn().mockResolvedValue({ data: { role: 'owner' }, error: null }),
       eq: vi.fn().mockReturnThis(),
       is: vi.fn().mockReturnThis(),
       limit: vi.fn().mockReturnThis(),

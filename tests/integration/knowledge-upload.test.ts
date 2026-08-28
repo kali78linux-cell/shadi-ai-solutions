@@ -169,6 +169,8 @@ describe('Knowledge Upload API Endpoint', () => {
     const json = await response.json();
 
     expect(response.status).toBe(500);
-    expect(json.error).toContain('Ingestion failed');
+    // Security: internal ingestion errors must NOT leak to the client.
+    expect(json.error).not.toContain('Ingestion failed');
+    expect(json.error).toContain('Upload failed');
   });
 });

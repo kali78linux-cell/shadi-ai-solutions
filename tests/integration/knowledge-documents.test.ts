@@ -3,33 +3,16 @@ import { GET } from '@/app/api/ai/knowledge/documents/route';
 
 const originalEnv = process.env;
 
-vi.mock('next/headers', () => ({
-  cookies: () => ({
-    get: () => undefined,
-    set: () => {},
-    remove: () => {},
-  }),
-}));
-
-vi.mock('@supabase/ssr', () => ({
-  createServerClient: vi.fn(),
-}));
-
-import { createServerClient } from '@supabase/ssr';
+const mockAuth = vi.hoisted(() => ({ authorizeClinicRequest: vi.fn() }));
+const mockAdmin = vi.hoisted(() => ({ supabaseAdmin: { from: vi.fn() } }));
+vi.mock('@/lib/services/clinicAuthorization', () => mockAuth);
+vi.mock('@/lib/supabase/admin', () => mockAdmin);
 
 describe('Knowledge documents API', () => {
-  const mockSupabaseClient = {
-    auth: {
-      getSession: vi.fn(),
-    },
-    from: vi.fn(),
-  };
-
   beforeEach(() => {
     process.env = { ...originalEnv, NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co', NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon', SUPABASE_SERVICE_ROLE_KEY: 'service' };
     vi.clearAllMocks();
-    (createServerClient as unknown as ReturnType<typeof vi.fn>).mockReturnValue(mockSupabaseClient);
-    mockSupabaseClient.auth.getSession.mockResolvedValue({ data: { session: { user: { id: 'user-1' } } } });
+    mockAuth.authorizeClinicRequest.mockResolvedValue({ authorized: true, user: { id: 'user-1' }, role: 'owner' });
   });
 
   test('returns documents for the active clinic', async () => {
@@ -37,13 +20,11 @@ describe('Knowledge documents API', () => {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       is: vi.fn().mockReturnThis(),
-      order: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockReturnThis(),
-      single: vi.fn().mockResolvedValue({ data: { clinic_id: 'clinic-1' }, error: null }),
+      order: vi.fn().mockResolvedValue({ data: [], error: null }),
     };
-    mockSupabaseClient.from.mockReturnValue(chainable);
+    mockAdmin.supabaseAdmin.from.mockReturnValue(chainable);
 
-    const response = await GET(new Request('http://localhost/api/ai/knowledge/documents'));
+    const response = await GET(new Request('http://localhost/api/ai/knowledge/documents?clinic_id=clinic-1'));
     const json = await response.json();
 
     expect(response.status).toBe(200);
