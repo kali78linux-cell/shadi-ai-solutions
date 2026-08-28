@@ -1,0 +1,53 @@
+{
+  "configured_threshold": 0.25,
+  "results": [
+    {
+      "id": "A",
+      "label": "pricing_exists_in_kb",
+      "query": "كم سعر تنظيف الأسنان؟",
+      "configured": 0.25,
+      "T_configured_0.25": {
+        "citations": 1,
+        "hasSufficientContext": true,
+        "maxConfidence": 0.5467
+      },
+      "T_default_0.7": {
+        "citations": 1,
+        "hasSufficientContext": false,
+        "maxConfidence": 0.5467
+      }
+    },
+    {
+      "id": "C",
+      "label": "prevention_not_in_kb",
+      "query": "شو إجراءات الوقاية من تسوس الأسنان؟",
+      "configured": 0.25,
+      "T_configured_0.25": {
+        "citations": 0,
+        "hasSufficientContext": false,
+        "maxConfidence": 0
+      },
+      "T_default_0.7": {
+        "citations": 0,
+        "hasSufficientContext": false,
+        "maxConfidence": 0
+      }
+    },
+    {
+      "id": "D",
+      "label": "newtom_not_in_kb",
+      "query": "هل عندكم جهاز NewTom؟",
+      "configured": 0.25,
+      "T_configured_0.25": {
+        "citations": 0,
+        "hasSufficientContext": false,
+        "maxConfidence": 0
+      },
+      "T_default_0.7": {
+        "citations": 0,
+        "hasSufficientContext": false,
+        "maxConfidence": 0
+      }
+    }
+  ]
+}

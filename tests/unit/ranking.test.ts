@@ -668,4 +668,18 @@ describe('Citation Metadata', () => {
     });
     expect(assembled.chunks[0].result?.content).toContain('accepts');
   });
+
+describe('computeConfidenceScore — sparse-result countFactor (STEP 9D: pinned, intentionally unchanged)', () => {
+  it('applies a small penalty when few results and none when many (no change to countFactor)', () => {
+    // base 0.8, 1 result → countFactor = min(1, 1/5)=0.2 → 0.8*(0.7+0.3*0.2)=0.608
+    const sparse = computeConfidenceScore(makeResult({ similarity: 0.8 }), 1);
+    expect(sparse).toBeCloseTo(0.608, 3);
+    // base 0.8, 5+ results → countFactor = 1 → 0.8*1.0 = 0.8
+    const plenty = computeConfidenceScore(makeResult({ similarity: 0.8 }), 5);
+    expect(plenty).toBeCloseTo(0.8, 3);
+    // penalty is downward-only and bounded: never exceeds raw base
+    expect(sparse).toBeLessThan(0.8);
+  });
+});
+
 });

@@ -35,6 +35,15 @@ const mockProvider = vi.hoisted(() => {
       stream: vi.fn().mockResolvedValue(stream),
     }),
     registerProvider: vi.fn(),
+    // Resilience (openStreamWithFailover) enumerates candidates via
+    // listProviders → provide the same streaming mock so the new resilient
+    // OPEN returns it as the (only) failover candidate.
+    listProviders: vi.fn().mockReturnValue([
+      {
+        id: 'mock-provider',
+        stream: vi.fn().mockResolvedValue(stream),
+      },
+    ]),
   };
 });
 vi.mock('@/lib/ai/provider', () => mockProvider);
@@ -121,4 +130,45 @@ describe('Streaming AI Orchestrator', () => {
     expect(mockConversationService.updateConversationState).toHaveBeenCalledWith('conv-1', 'awaiting_staff', 'clinic-1');
     expect(mockNotificationService.notifyStaffForHandoff).toHaveBeenCalledWith('clinic-1', 'conv-1');
   });
+
+  it('uses the configured threshold and keeps grounded context (does NOT fall back to "unavailable")', async () => {
+    // Demo clinic real configured threshold.
+    mockSupabase.supabase.from('clinic_ai_settings').select().eq().limit().single.mockResolvedValue({
+      data: { assistant_name: 'TestBot', confidence_threshold: 0.25 }, error: null,
+    });
+    // A strong-but-sparse chunk that the internal 0.7 assembly threshold would have
+    // marked hasSufficientContext=false, but the configured 0.25 accepts.
+    mockContextRetrieval.retrieveContext.mockResolvedValue({
+      chunks: [{ content: 'Cleaning costs $70.', citation: { chunkId: 'c1', confidenceScore: 0.62 } }],
+      citations: [{ chunkId: 'c1', confidenceScore: 0.62, content: 'Cleaning costs $70.' }],
+      totalTokens: 5, truncated: false, hasSufficientContext: true, hasConflictingContext: false,
+    });
+    mockPromptManager.buildPrompt.mockReturnValue('RAG PROMPT');
+
+    const response = await streamAndRecordResponse({
+      clinicId: 'clinic-1', conversationId: 'conv-1', text: 'How much is cleaning?',
+    });
+
+    expect(mockContextRetrieval.retrieveContext).toHaveBeenCalledWith('clinic-1', 'How much is cleaning?', 5, 2000, 0.25);
+    // Real streaming response (grounded context reached the LLM), NOT the text fallback.
+    expect(response).toBeInstanceOf(StreamingTextResponse);
+    expect(mockPromptManager.buildPrompt).toHaveBeenCalled();
+  });
+
+  it('returns the honest unavailable fallback (no fabricated citation) when no KB context matches', async () => {
+    mockContextRetrieval.retrieveContext.mockResolvedValue({
+      chunks: [], citations: [], totalTokens: 0, truncated: false, hasSufficientContext: false, hasConflictingContext: false,
+    });
+
+    const response = await streamAndRecordResponse({
+      clinicId: 'clinic-1', conversationId: 'conv-1', text: 'Do you offer a NewTom panoramic device?',
+    });
+
+    // No LLM reach, no invented citation.
+    expect(mockPromptManager.buildPrompt).not.toHaveBeenCalled();
+    expect(response).not.toBeInstanceOf(StreamingTextResponse);
+    const text = await response.text();
+    expect(text).toContain('don\'t have enough reliable information');
+  });
+
 });

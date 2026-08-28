@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '@/lib/supabase/admin';
 import { logEvent } from '@/lib/server/logging';
 import { getProvider } from './provider';
+import { openStreamWithFailover } from './resilience';
 import { retrieveContext } from './contextRetrieval';
 import { buildPrompt } from './promptManager';
 import { analyzeAndPersistMessage } from '@/lib/services/conversationIntelligence';
@@ -9,6 +10,7 @@ import { updateConversationState } from '@/lib/services/conversationService';
 import { notifyStaffForHandoff } from '@/lib/services/notificationService';
 import { calculateCost } from '@/lib/services/aiCostService';
 import { moderateUserPrompt, ContentFlaggedError } from './security';
+import { persistHandoffReply } from './handoffMessages';
 import { StreamingTextResponse } from './streamingResponse';
 import { detectLanguage } from '@/lib/services/knowledge/multilingual';
 import type { AssembledContext } from '@/lib/services/knowledge/contextAssembly';
@@ -53,7 +55,23 @@ export async function streamAndRecordResponse(opts: {
     await updateConversationState(conversationId, 'awaiting_staff', clinicId);
     await notifyStaffForHandoff(clinicId, conversationId);
     logEvent('ai_handoff_triggered', { clinic_id: clinicId, conversation_id: conversationId, reason: intelligence.intent });
-    return new Response(JSON.stringify({ message: 'Handoff triggered. An agent will be with you shortly.' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    // P0 FIX: persist + return the exact patient-facing reply (emergency gets
+    // urgent-care instructions) instead of an English-only technical ack.
+    const handoffReply = await persistHandoffReply({
+      supabase: supabaseAdmin,
+      clinicId,
+      conversationId,
+      intent: intelligence.intent,
+    });
+    return new Response(
+      JSON.stringify({
+        message: 'Handoff triggered. An agent will be with you shortly.',
+        handoff: true,
+        emergency: handoffReply.emergency,
+        assistant_message: { role: 'assistant', content: handoffReply.content },
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 
   // Security: Moderate user input before processing
@@ -67,7 +85,15 @@ export async function streamAndRecordResponse(opts: {
   }
 
   const history = await getConversationHistory(conversationId, 10);
-  const retrieved = await retrieveContext(clinicId, text, 5);
+  // Use the clinic-configured confidence threshold (same source + fallback as
+  // the non-streaming orchestrator) so RAG assembly and the sufficiency gate
+  // stay consistent, and strong-but-sparse chunks are not rejected by the
+  // hard-coded assembly default. Passed through to retrieveContext so
+  // assembleContext() computes hasSufficientContext against THIS value.
+  const configuredConfidenceThreshold = Number(
+    settingsData?.confidence_threshold ?? settingsData?.safety_controls?.confidence_threshold ?? 0.7
+  );
+  const retrieved = await retrieveContext(clinicId, text, 5, 2000, configuredConfidenceThreshold);
   // Normalize: handle both old-style (array) and new-style (AssembledContext) returns
   const contextForPrompt = Array.isArray(retrieved)
     ? retrieved
@@ -80,7 +106,6 @@ export async function streamAndRecordResponse(opts: {
       confidenceScore: chunk.citation.confidenceScore,
       type: 'unstructured' as const,
     }) || []);
-  const configuredConfidenceThreshold = Number(settingsData?.confidence_threshold ?? 0.7);
   const isAssembledContext = !Array.isArray(retrieved);
   if (isAssembledContext) {
     const assembled = retrieved as AssembledContext;
@@ -136,15 +161,20 @@ export async function streamAndRecordResponse(opts: {
     ? buildPrompt(settingsData || null, text, history, contextForPrompt as any, (retrieved as AssembledContext).citations, promptOptions)
     : buildPrompt(settingsData || null, text, history, contextForPrompt as any, undefined, promptOptions);
 
-  // --- Streaming Implementation ---
+  // --- Streaming Implementation (STEP 8: resilient stream OPEN) ---
+  // Fetching the stream (provider handshake) goes through the SAME bounded
+  // retry + failover used by the non-streaming path. Once bytes flow we cannot
+  // switch providers, so only the open is hardened — this fixes a real gap
+  // where a single transient provider hiccup failed the whole streaming turn.
   const start = Date.now();
-  const providerName = provider.id;
-  // Use the provider abstraction's stream() — supports OpenAI, Anthropic, Ollama.
-  const stream = await provider.stream({
+  const openResult = await openStreamWithFailover({
     prompt,
     maxTokens: 1024,
     temperature: 0.2,
+    preferredProviderId: modelPreference || undefined,
   });
+  const stream = openResult.stream;
+  const providerName = openResult.providerId;
 
   const streamWithRecord = new ReadableStream({
     async start(controller) {

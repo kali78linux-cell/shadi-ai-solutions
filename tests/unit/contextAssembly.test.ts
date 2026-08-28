@@ -70,3 +70,15 @@ describe('Production context assembly', () => {
     expect(assembled.hasSufficientContext).toBe(true);
   });
 });
+
+  it('uses the passed confidence threshold to decide sufficiency — the clinic value gates acceptance (STEP 9D)', () => {
+    const chunk = result({ confidenceScore: 0.5 });
+    // Configured clinic threshold (0.25) accepts this chunk as sufficient…
+    expect(assembleContext([chunk], 2000, 0.25).hasSufficientContext).toBe(true);
+    // …while the hard-coded 0.7 default would reject the identical chunk.
+    expect(assembleContext([chunk], 2000, 0.7).hasSufficientContext).toBe(false);
+    // Both cases still surface the same single citation (no fabrication of extras).
+    expect(assembleContext([chunk], 2000, 0.25).citations.length).toBe(1);
+    expect(assembleContext([chunk], 2000, 0.7).citations.length).toBe(1);
+  });
+

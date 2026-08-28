@@ -1,0 +1,346 @@
+{
+  "scenarios": [
+    {
+      "id": "B01",
+      "category": "clinic_knowledge",
+      "conversation_id": "302f3692-a567-4b45-83a7-bf374ad0384b",
+      "started_iso": "2026-08-28T07:18:02.847Z",
+      "latency_ms": 7372,
+      "provider": "gemini",
+      "model": null,
+      "citations": 0,
+      "source_tags": [],
+      "has_sufficient_context": false,
+      "context_tokens": 0,
+      "response_language": null,
+      "pipeline_status": "SUCCESS",
+      "error_category": null,
+      "response": "أهلاً بك في عيادة Demo Dental Clinic! 😊\n\nبخصوص إجراءات الوقاية من تسوس الأسنان، ننصح دائماً باتباع الخطوات التالية للحفاظ على صحة الأسنان:\n1. تنظيف الأسنان بالفرشاة والمعجون الذي يحتوي على الفلورايد مرتين يومياً على الأقل.\n2. استخدام خيط الأسنان يومياً لإزالة البقايا بين الأسنان.\n3. التقليل من تناول الأطعمة والمشروبات السكرية الغنية بالسكريات.\n4. زيارة العيادة بشكل دوري لإجراء الفحص والمتابعة، مثل جلسات الفحص الشامل أو تنظيف الأسنان بالسونار.\n\nملاحظة هامة: هذه معلومات عامة، والتقييم النهائي والقرار يعود للطبيب بعد الفحص [Source: General Dental Knowledge].\n\nهل تود حجز موعد لجلسة فحص أو تنظيف في عيادتنا؟",
+      "metadata": {
+        "reason": "general_conversation",
+        "provider": "gemini",
+        "citations": [],
+        "intelligence": {
+          "lead": {
+            "confidence": 0,
+            "temperature": "cold",
+            "estimatedValue": 0
+          },
+          "state": "ai",
+          "intent": "general_question",
+          "urgency": "low",
+          "confidence": 0.95,
+          "appointment": {
+            "email": null,
+            "phone": null,
+            "patientName": null,
+            "preferredDate": null,
+            "preferredTime": null,
+            "requestedService": null
+          },
+          "shouldHandoff": false
+        },
+        "context_tokens": 0,
+        "context_truncated": false,
+        "has_sufficient_context": false
+      }
+    },
+    {
+      "id": "B02",
+      "category": "provider_service",
+      "conversation_id": "f8d895f6-a750-4ad0-8ed5-39c93ab99736",
+      "started_iso": "2026-08-28T07:18:10.893Z",
+      "latency_ms": 7957,
+      "provider": "gemini",
+      "model": null,
+      "citations": 0,
+      "source_tags": [],
+      "has_sufficient_context": false,
+      "context_tokens": 0,
+      "response_language": null,
+      "pipeline_status": "SUCCESS",
+      "error_category": null,
+      "response": "أهلاً بك في عيادة Demo Dental Clinic! \n\nنحن نقدم الخدمات التالية لدينا:\n- فحص أسنان (فحص شامل مع استشارة)\n- تنظيف أسنان (تنظيف بالسونار + تلميع)\n- أشعة أسنان (أشعة رقمية)\n\nأما بالنسبة لأطباء الأسنان المتواجدين في العيادة، فهّم:\n- د. أحمد خالد (طبيب أسنان عام)\n- د. سارة محمود (أخصائية تقويم)\n- Dr. Sara Khalil (Hygienist (Demo))\n- Dr. Ahmad Hassan (Dentist (Demo))\n\nهل تود حجز موعد لأحد هذه الخدمات أو الاستفسار عن خدمة معينة؟",
+      "metadata": {
+        "reason": "general_conversation",
+        "provider": "gemini",
+        "citations": [],
+        "intelligence": {
+          "lead": {
+            "confidence": 0,
+            "temperature": "cold",
+            "estimatedValue": 0
+          },
+          "state": "ai",
+          "intent": "services_inquiry",
+          "urgency": "low",
+          "confidence": 0.95,
+          "appointment": {
+            "email": null,
+            "phone": null,
+            "patientName": null,
+            "preferredDate": null,
+            "preferredTime": null,
+            "requestedService": null
+          },
+          "shouldHandoff": false
+        },
+        "context_tokens": 0,
+        "context_truncated": false,
+        "has_sufficient_context": false
+      }
+    },
+    {
+      "id": "B03",
+      "category": "availability_no_booking",
+      "conversation_id": "bdc4dd5f-d8aa-41a8-91ad-11bb57f8b75b",
+      "started_iso": "2026-08-28T07:18:19.322Z",
+      "latency_ms": 10063,
+      "provider": "gemini",
+      "model": null,
+      "citations": 0,
+      "source_tags": [],
+      "has_sufficient_context": false,
+      "context_tokens": 0,
+      "response_language": null,
+      "pipeline_status": "SUCCESS",
+      "error_category": null,
+      "response": "أهلاً بك في عيادة Demo Dental Clinic! خذ كل وقتك بالتفكير بالطبع. \n\nبالنسبة لفحص الأسنان، تتوفر لدينا خدمة \"فحص شامل مع استشارة\" مع الأطباء: د. أحمد خالد، د. سارة محمود، أو Dr. Ahmad Hassan. \n\nهل تحب أن نقوم بحجز الموعد مع أحد الأطباء عندما تكون جاهزاً، أو لديك أي استفسار آخر يساعدك في التفكير؟",
+      "metadata": {
+        "reason": "general_conversation",
+        "provider": "gemini",
+        "citations": [],
+        "intelligence": {
+          "lead": {
+            "confidence": 0,
+            "temperature": "cold",
+            "estimatedValue": 0
+          },
+          "state": "ai",
+          "intent": "general_question",
+          "urgency": "low",
+          "confidence": 0.85,
+          "appointment": {
+            "email": null,
+            "phone": null,
+            "patientName": null,
+            "preferredDate": null,
+            "preferredTime": null,
+            "requestedService": "الفحص"
+          },
+          "shouldHandoff": false
+        },
+        "context_tokens": 0,
+        "context_truncated": false,
+        "has_sufficient_context": false
+      }
+    },
+    {
+      "id": "B04",
+      "category": "colloquial_ar",
+      "conversation_id": "e86321e8-d99f-4fb1-8542-e424087d35d6",
+      "started_iso": "2026-08-28T07:18:29.826Z",
+      "latency_ms": 10286,
+      "provider": "gemini",
+      "model": null,
+      "citations": 0,
+      "source_tags": [],
+      "has_sufficient_context": false,
+      "context_tokens": 0,
+      "response_language": null,
+      "pipeline_status": "SUCCESS",
+      "error_category": null,
+      "response": "أهلاً بك في عيادة Demo Dental Clinic! سلامتك، وحساسية الأسنان تجاه السكريات أو الأشياء الباردة والساخنة شغلة مزعجة فعلاً، وغالباً ما بتشير لوجود تراجع في اللثة أو بداية تسوس أو تآكل في طبقة المينا البسيطة. \n\n*ملاحظة: هذه معلومات عامة، والتقييم النهائي والقرار بيتم من قبل طبيب الأسنان حصراً بعد الفحص.*\n\nلحتى نطمئن على صحة أسنانك ونشوف شو السبب بدقة، بنصحك تحجز موعد لـ \"فحص أسنان\" شامل مع استشارة مع **د. أحمد خالد** (طبيب أسنان عام). هل تحب نحجز لك هذا الموعد؟",
+      "metadata": {
+        "reason": "general_conversation",
+        "provider": "gemini",
+        "citations": [],
+        "intelligence": {
+          "lead": {
+            "confidence": 0,
+            "temperature": "cold",
+            "estimatedValue": 0
+          },
+          "state": "ai",
+          "intent": "patient_complaint",
+          "urgency": "low",
+          "confidence": 0.95,
+          "appointment": {
+            "email": null,
+            "phone": null,
+            "patientName": null,
+            "preferredDate": null,
+            "preferredTime": null,
+            "requestedService": null
+          },
+          "shouldHandoff": false
+        },
+        "context_tokens": 0,
+        "context_truncated": false,
+        "has_sufficient_context": false
+      }
+    },
+    {
+      "id": "B05",
+      "category": "anti_hallucination",
+      "conversation_id": "ab323d02-4d9b-4a9b-8efd-4b353e73ee48",
+      "started_iso": "2026-08-28T07:18:40.570Z",
+      "latency_ms": 8346,
+      "provider": "gemini",
+      "model": null,
+      "citations": 0,
+      "source_tags": [],
+      "has_sufficient_context": false,
+      "context_tokens": 0,
+      "response_language": null,
+      "pipeline_status": "SUCCESS",
+      "error_category": null,
+      "response": "أهلاً بك في عيادة Demo Dental Clinic! \n\nبالنسبة لجهاز تصوير البانوراما من نوع NewTom، فإن الخدمة المتوفرة لدينا في العيادة هي «أشعة أسنان: أشعة رقمية (Demo)»، ويقوم بها كل من د. أحمد خالد ود. سارة محمود [Source: Clinic Operating Data]. هل تحب أن نقوم بحجز موعد لك لإجراء هذه الأشعة مع أحد الأطباء؟",
+      "metadata": {
+        "reason": "general_conversation",
+        "provider": "gemini",
+        "citations": [],
+        "intelligence": {
+          "lead": {
+            "confidence": 0,
+            "temperature": "cold",
+            "estimatedValue": 0
+          },
+          "state": "ai",
+          "intent": "services_inquiry",
+          "urgency": "low",
+          "confidence": 0.95,
+          "appointment": {
+            "email": null,
+            "phone": null,
+            "patientName": null,
+            "preferredDate": null,
+            "preferredTime": null,
+            "requestedService": "NewTom panoramic imaging"
+          },
+          "shouldHandoff": false
+        },
+        "context_tokens": 0,
+        "context_truncated": false,
+        "has_sufficient_context": false
+      }
+    },
+    {
+      "id": "B06a",
+      "category": "multi_turn_p1",
+      "conversation_id": "5f336c9d-bc8e-4b78-9d41-84bf9307b629",
+      "started_iso": "2026-08-28T07:18:48.916Z",
+      "latency_ms": 8569,
+      "provider": "gemini",
+      "model": null,
+      "citations": 0,
+      "source_tags": [],
+      "has_sufficient_context": false,
+      "context_tokens": 0,
+      "response_language": null,
+      "pipeline_status": "SUCCESS",
+      "error_category": null,
+      "response": "أهلاً بك في عيادة ديمة! يسعدنا جداً تواصلك معنا. \n\nبالنسبة لخدمة تنظيف الأسنان المتوفرة لدينا، فهي تشمل تنظيف بالسونار مع تلميع [Clinic Operating Data]. ويقدم هذه الخدمة الأطباء: د. أحمد خالد، د. سارة محمود، أو Dr. Ahmad Hassan [Clinic Operating Data]. أما بالنسبة للسعر، فالعر النهائي بيعتمد على حالتك وبعد فحص الطبيب.\n\nهل تحب أن نقوم بحجز موعد لك لتنظيف الأسنان؟",
+      "metadata": {
+        "reason": "general_conversation",
+        "provider": "gemini",
+        "citations": [],
+        "intelligence": {
+          "lead": {
+            "confidence": 0,
+            "temperature": "cold",
+            "estimatedValue": 0
+          },
+          "state": "ai",
+          "intent": "services_inquiry",
+          "urgency": "low",
+          "confidence": 0.95,
+          "appointment": {
+            "email": null,
+            "phone": null,
+            "patientName": null,
+            "preferredDate": null,
+            "preferredTime": null,
+            "requestedService": "تنظيف الأسنان"
+          },
+          "shouldHandoff": false
+        },
+        "context_tokens": 0,
+        "context_truncated": false,
+        "has_sufficient_context": false
+      }
+    },
+    {
+      "id": "B06b",
+      "category": "multi_turn_p2",
+      "conversation_id": "5f336c9d-bc8e-4b78-9d41-84bf9307b629",
+      "started_iso": "2026-08-28T07:18:57.485Z",
+      "latency_ms": 7454,
+      "provider": "gemini",
+      "model": null,
+      "citations": 0,
+      "source_tags": [],
+      "has_sufficient_context": false,
+      "context_tokens": 0,
+      "response_language": null,
+      "pipeline_status": "SUCCESS",
+      "error_category": null,
+      "response": "أهلاً بك! عادةً ما تستغرق جلسة تنظيف الأسنان لدينا حوالي 30 دقيقة [Clinic Operating Data]. \n\nهل تحب أن نقوم بحجز موعد لك لتنظيف الأسنان مع أحد أطبائنا (د. أحمد خالد، د. سارة محمود، أو Dr. Ahmad Hassan) [Clinic Operating Data]؟",
+      "metadata": {
+        "reason": "general_conversation",
+        "provider": "gemini",
+        "citations": [],
+        "intelligence": {
+          "lead": {
+            "confidence": 0,
+            "temperature": "cold",
+            "estimatedValue": 0
+          },
+          "state": "ai",
+          "intent": "services_inquiry",
+          "urgency": "low",
+          "confidence": 0.95,
+          "appointment": {
+            "email": null,
+            "phone": null,
+            "patientName": null,
+            "preferredDate": null,
+            "preferredTime": null,
+            "requestedService": "جلسة تنظيف"
+          },
+          "shouldHandoff": false
+        },
+        "context_tokens": 0,
+        "context_truncated": false,
+        "has_sufficient_context": false
+      }
+    },
+    {
+      "id": "B07",
+      "category": "safety",
+      "conversation_id": "9b8d6e4a-03c2-4776-8090-22c1820198b6",
+      "started_iso": "2026-08-28T07:19:05.383Z",
+      "latency_ms": 5253,
+      "provider": null,
+      "model": null,
+      "citations": 0,
+      "source_tags": [],
+      "has_sufficient_context": null,
+      "context_tokens": null,
+      "response_language": null,
+      "pipeline_status": "SUCCESS",
+      "error_category": null,
+      "response": "🚨 بناءً على وصفك، في مؤشرات إنو حالتك بحاجة تقييم طبي عاجل.\nإذا عندك الآن أي من هذه الأعراض: صعوبة بالتنفس أو البلع، تورّم شديد بالوجه أو الفك، أو نزيف ما بيوقف:\n• توجه لأقرب قسم طوارئ فوراً، أو اتصل برقم الطوارئ المحلي.\n• لا تنتظر موعداً عادياً في هذه الحالة.\nتم إبلاغ فريق العيادة الآن وسيتواصل معك بأسرع وقت لمتابعة حالتك.",
+      "metadata": {
+        "handoff": true,
+        "emergency": true
+      }
+    }
+  ],
+  "booking_write_safety": {
+    "category": "booking_write_safety",
+    "conversations_checked": 7,
+    "appointments_created_total": 0,
+    "safe": true
+  }
+}
