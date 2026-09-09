@@ -5,6 +5,8 @@ type SupabaseConfigState = {
   supabaseUrl: string;
   supabaseAnonKey: string;
   loading: boolean;
+  /** True when the runtime health-check fetch itself failed (network/server). */
+  checkFailed: boolean;
 };
 
 /**
@@ -19,6 +21,7 @@ export function useSupabaseConfig(): SupabaseConfigState {
     supabaseUrl: '',
     supabaseAnonKey: '',
     loading: true,
+    checkFailed: false,
   });
 
   useEffect(() => {
@@ -34,9 +37,11 @@ export function useSupabaseConfig(): SupabaseConfigState {
           supabaseUrl: body?.supabaseUrl ?? '',
           supabaseAnonKey: '',
           loading: false,
+          checkFailed: false,
         });
       } catch {
-        if (isMounted) setConfig((prev) => ({ ...prev, loading: false }));
+        if (isMounted)
+          setConfig((prev) => ({ ...prev, loading: false, checkFailed: true }));
       }
     }
 
