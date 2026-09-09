@@ -7,7 +7,7 @@ import { useSupabaseConfig } from '@/lib/useSupabaseConfig';
 type ClinicMembership = {
   clinic_id: string;
   role: string;
-  clinic: { id: string; name: string; slug: string } | null;
+  clinic: { id: string; name: string; slug: string; activity_type: string | null } | null;
 };
 
 export type ClinicContext = {
@@ -16,6 +16,7 @@ export type ClinicContext = {
   clinicId: string | null;
   clinicSlug: string | null;
   clinicName: string | null;
+  activityType: string | null;
   role: string | null;
   memberships: ClinicMembership[];
   /** Real auth headers: Authorization Bearer <access_token> */
@@ -73,7 +74,7 @@ export function useClinicContext(): ClinicContext {
     // 1. Load real memberships from clinic_users
     const { data, error: membershipError } = await supabase
       .from('clinic_users')
-      .select('clinic_id, role, clinic:clinics(id, name, slug)')
+      .select('clinic_id, role, clinic:clinics(id, name, slug, activity_type)')
       .eq('user_id', sessionData.session.user.id)
       .is('deleted_at', null);
 
@@ -139,6 +140,7 @@ export function useClinicContext(): ClinicContext {
     clinicId: active?.clinic_id ?? clinicId,
     clinicSlug: active?.clinic?.slug ?? null,
     clinicName: active?.clinic?.name ?? null,
+    activityType: active?.clinic?.activity_type ?? null,
     role,
     memberships,
     authHeaders,
