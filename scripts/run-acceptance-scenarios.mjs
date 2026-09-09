@@ -34,7 +34,7 @@ import { detectConversationIntelligence } from '../lib/ai/intelligence.ts';
 import { buildPrompt } from '../lib/ai/promptManager.ts';
 
 // --- Gemini API key ---
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '***REDACTED-GOOGLE-API-KEY***_eL0OqUEQvODzzXpENuh6jZO4TSS_XZfGaEiqzc_g9w';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
 const GEMINI_MODEL = 'gemini-3.6-flash';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
