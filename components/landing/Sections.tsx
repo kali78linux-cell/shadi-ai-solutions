@@ -248,8 +248,11 @@ export function Pricing() {
                 <span className="mb-1 text-sm text-landing-text/60">{landingCopy.pricing.standard.per}</span>
               </div>
               <p className="mt-2 text-sm font-semibold text-landing-text/70">{landingCopy.pricing.standard.note}</p>
+              {/* Standard card — "ابدأ الآن" leads to the existing registration
+                  flow (per product spec: registration-first, no new checkout
+                  path). "احجز مكانك" above stays a founding lead-form CTA. */}
               <div className="mt-6">
-                <LandingButton href="#founding" variant="secondary" size="lg" className="w-full">
+                <LandingButton href="/register" variant="secondary" size="lg" className="w-full">
                   ابدأ الآن
                 </LandingButton>
               </div>
