@@ -45,6 +45,14 @@ async function stripeRequest(path: string, init?: RequestInit): Promise<any> {
   return json;
 }
 
+/**
+ * Contract export for the payment provider adapter (stripeProvider.ts).
+ * The adapter calls this for Connect account / PaymentIntent / Refund calls
+ * with a form-encoded body + optional idempotency headers. Behaviourally it is
+ * the same `stripeRequest` above (which always sends the auth headers).
+ */
+export const stripeRequestWithHeaders = stripeRequest;
+
 function toForm(data: Record<string, unknown>): string {
   const p = new URLSearchParams();
   // Stripe expects nested structures in PHP-style bracket notation
@@ -95,6 +103,15 @@ export async function createCheckoutSession(params: CreateCheckoutParams): Promi
     }),
   });
   return { url: session.url, id: session.id };
+}
+
+/**
+ * Fetches a Checkout Session (with line_items) for the webhook activation
+ * cross-check. Uses `?expand[]=line_items` so price/amount/currency can be
+ * verified server-side before a subscription is activated.
+ */
+export async function getCheckoutSession(sessionId: string): Promise<any> {
+  return stripeRequest(`/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=line_items`);
 }
 
 /**

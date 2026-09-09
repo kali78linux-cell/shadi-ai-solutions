@@ -55,8 +55,8 @@ export async function getClinicById(id: string): Promise<Clinic | null> {
  * Never falls back to a fake/default clinic — the caller must handle
  * the null case by showing a clinic-not-found state.
  */
-export async function resolvePublicClinic(params: { id?: string; slug?: string }): Promise<PublicClinic | null> {
-  if (!params.id && !params.slug) {
+export async function resolvePublicClinic(params: { id?: string; publicId?: string; slug?: string }): Promise<PublicClinic | null> {
+  if (!params.id && !params.publicId && !params.slug) {
     return null;
   }
 
@@ -67,6 +67,8 @@ export async function resolvePublicClinic(params: { id?: string; slug?: string }
 
   if (params.id) {
     query = query.eq('id', params.id);
+  } else if (params.publicId) {
+    query = query.eq('public_id', params.publicId);
   } else {
     query = query.eq('slug', params.slug);
   }

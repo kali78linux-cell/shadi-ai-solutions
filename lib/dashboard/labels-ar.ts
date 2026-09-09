@@ -69,3 +69,18 @@ export function formatTimeAr(hhmm: string): string {
   const minutes = m === '00' ? '' : `:${m}`;
   return `${hour12}${minutes} ${period}`;
 }
+
+const BILLING_MONTH_AR = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+
+/**
+ * "2026-09-01" (entitlement period_start) → "سبتمبر 2026".
+ * Used by the subscription route to label the current usage period.
+ */
+export function billingPeriodLabelAr(periodStart: string): string {
+  const match = /^(\d{4})-(\d{2})/.exec(periodStart ?? '');
+  if (!match) return '';
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) return '';
+  return `${BILLING_MONTH_AR[month - 1]} ${year}`;
+}

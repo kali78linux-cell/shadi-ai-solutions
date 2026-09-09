@@ -15,8 +15,22 @@ import ChatInterface from '@/components/chat/ChatInterface';
  * The clinic identifier is resolved by the parent gate and passed here as a slug
  * (or uuid) — this component adds no data and no new API.
  */
-export default function FloatingChatWidget({ clinicId, clinicName }: { clinicId: string; clinicName?: string | null }) {
+export default function FloatingChatWidget({
+  clinicId,
+  clinicName,
+  externalOpenSignal,
+}: {
+  clinicId: string;
+  clinicName?: string | null;
+  /** When this counter changes to a value > 0 the panel opens programmatically. */
+  externalOpenSignal?: number;
+}) {
   const [open, setOpen] = useState(false);
+
+  // Honor an external "open chat" signal (e.g. a CTA on the public page).
+  useEffect(() => {
+    if (externalOpenSignal && externalOpenSignal > 0) setOpen(true);
+  }, [externalOpenSignal]);
 
   // Prevent background scroll while the panel is open on mobile.
   useEffect(() => {
