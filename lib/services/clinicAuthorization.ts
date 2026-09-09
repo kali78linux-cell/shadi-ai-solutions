@@ -68,6 +68,31 @@ export const ADMIN_ROLES: readonly string[] = ['owner', 'manager'];
 export const DATA_ROLES: readonly string[] = [...ADMIN_ROLES, 'doctor', 'receptionist', 'staff'];
 
 /**
+ * Accounting module role gates — finance operations.
+ * Consumers (clinic accounting routes) import these; the documented semantics
+ * are “owner/accountant” for admin finance actions, with read access granted
+ * to managers for oversight, and receptionists allowed to record payments
+ * (front-desk checkout) without any administrative finance power.
+ */
+
+/** Roles allowed to perform admin finance actions (voids, adjustments, write-offs). */
+export const FINANCE_ADMIN_ROLES: readonly string[] = ['owner', 'accountant'];
+/** Roles allowed to READ financial data (invoices, payments, balances). */
+export const FINANCE_READ_ROLES: readonly string[] = [...FINANCE_ADMIN_ROLES, 'manager'];
+/** Roles allowed to create invoices. */
+export const INVOICE_CREATE_ROLES: readonly string[] = FINANCE_ADMIN_ROLES;
+/** Roles allowed to record a payment against an invoice (front-desk checkout). */
+export const PAYMENT_RECORD_ROLES: readonly string[] = [...FINANCE_ADMIN_ROLES, 'receptionist'];
+/** Roles allowed to record expenses. */
+export const EXPENSE_RECORD_ROLES: readonly string[] = FINANCE_ADMIN_ROLES;
+/** Roles allowed to manage expense categories. */
+export const EXPENSE_CATEGORY_MANAGE_ROLES: readonly string[] = FINANCE_ADMIN_ROLES;
+/** Roles allowed to open a cash session (front desk / admin). */
+export const CASH_SESSION_OPEN_ROLES: readonly string[] = [...FINANCE_ADMIN_ROLES, 'receptionist'];
+/** Roles allowed to close a cash session (admin/accountant only). */
+export const CASH_SESSION_CLOSE_ROLES: readonly string[] = FINANCE_ADMIN_ROLES;
+
+/**
  * Role gate on top of membership: authenticated + member + role check.
  * Returns a NextResponse-shaped rejection or null when allowed.
  */
