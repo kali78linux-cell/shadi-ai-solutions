@@ -74,7 +74,7 @@ export async function POST(req: Request) {
 
     if (createUserError) {
       // Clean duplicate-email error
-      if (createUserError.message.toLowerCase().includes('already registered')) {
+      if (/already\s+(been\s+)?registered/i.test(createUserError.message)) {
         return NextResponse.json(
           { error: 'This email is already registered. Please log in.' },
           { status: 409 }

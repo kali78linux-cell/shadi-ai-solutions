@@ -24,7 +24,9 @@ async function main() {
   console.log('=== Verify real login (anon key only, same as browser) ===');
   const { data, error } = await browserLikeClient.auth.signInWithPassword({
     email: 'shadisuad78@gmail.com',
-    password: '111978',
+    // Do NOT hardcode real credentials. Run with:
+    //   REAL_LOGIN_PASSWORD=... node scripts/verify-real-login.mjs
+    password: process.env.REAL_LOGIN_PASSWORD ?? '',
   });
 
   if (error) {

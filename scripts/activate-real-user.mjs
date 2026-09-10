@@ -39,11 +39,17 @@ async function main() {
   // Prefer the exact target email from the task (shadisuad78@gmail.com).
   let target = (page.users || []).find((u) => u.email === 'shadisuad78@gmail.com');
   if (!target) {
-    // The seed.sql intended to create shadisuad78@gmail.com with password 111978.
-    console.log('Creating user shadisuad78@gmail.com (password 111978) as the seed intended...');
+    // The seed.sql intended to create shadisuad78@gmail.com; the password is
+    // supplied at runtime (never hardcode real credentials):
+    //   REAL_LOGIN_PASSWORD=... node scripts/activate-real-user.mjs
+    const realPassword = process.env.REAL_LOGIN_PASSWORD;
+    if (!realPassword) {
+      throw new Error('REAL_LOGIN_PASSWORD env var is required to create the user.');
+    }
+    console.log('Creating user shadisuad78@gmail.com with a runtime-provided password...');
     const { data: created, error: createErr } = await sb.auth.admin.createUser({
       email: 'shadisuad78@gmail.com',
-      password: '111978',
+      password: realPassword,
       email_confirm: true,
     });
     if (createErr) throw new Error('createUser failed: ' + createErr.message);
