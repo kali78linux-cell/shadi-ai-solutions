@@ -1,12 +1,12 @@
-import DashboardSection from '@/components/dashboard/DashboardSection';
-import ProviderServiceManager from '@/components/dashboard/clinic/ProviderServiceManager';
+import { redirect } from 'next/navigation';
+import { resolveTenantRedirect } from '@/lib/services/tenantAccess';
 
-export const metadata = { title: 'Services' };
+export const dynamic = 'force-dynamic';
 
-export default function ServicesPage() {
-  return (
-    <DashboardSection title="Services" subtitle="Manage your clinic services and pricing.">
-      <ProviderServiceManager mode="services" />
-    </DashboardSection>
-  );
+/**
+ * TENANT-ISOLATED DASHBOARD — legacy flat `services` path (compat redirect).
+ * Canonical URL is /dashboard/{clinicSlug}/services.
+ */
+export default async function LegacyServicesPage() {
+  redirect(await resolveTenantRedirect('/services'));
 }

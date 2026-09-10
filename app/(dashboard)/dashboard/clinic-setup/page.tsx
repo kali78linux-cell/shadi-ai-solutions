@@ -1,12 +1,12 @@
-import DashboardSection from '@/components/dashboard/DashboardSection';
-import ClinicSetupManager from '@/components/dashboard/clinic/ClinicSetupManager';
+import { redirect } from 'next/navigation';
+import { resolveTenantRedirect } from '@/lib/services/tenantAccess';
 
-export const metadata = { title: 'Clinic Setup' };
+export const dynamic = 'force-dynamic';
 
-export default function ClinicSetupPage() {
-  return (
-    <DashboardSection title="Clinic Setup" subtitle="Complete your clinic profile and track readiness for public booking.">
-      <ClinicSetupManager />
-    </DashboardSection>
-  );
+/**
+ * TENANT-ISOLATED DASHBOARD — legacy flat `clinic-setup` path (compat redirect).
+ * Canonical URL is /dashboard/{clinicSlug}/clinic-setup.
+ */
+export default async function LegacyClinicSetupPage() {
+  redirect(await resolveTenantRedirect('/clinic-setup'));
 }

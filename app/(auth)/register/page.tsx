@@ -99,7 +99,7 @@ export default function RegisterPage() {
     <main className="min-h-screen bg-slate-950 px-4 py-12 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-md rounded-[2rem] border border-slate-800 bg-slate-900/90 p-8 shadow-xl shadow-slate-950/30">
         <h1 className="text-3xl font-semibold text-white">إنشاء حساب عيادة جديدة</h1>
-        <p className="mt-3 text-slate-400">سجل كمالك العيادة لبدء استخدام لوحة تحكم Dental AI Receptionist.</p>
+        <p className="mt-3 text-slate-400">سجل كمالك العيادة لبدء استخدام لوحة تحكم موظفة الاستقبال الذكية.</p>
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div>

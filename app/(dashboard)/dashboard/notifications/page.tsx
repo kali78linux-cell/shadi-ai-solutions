@@ -1,12 +1,12 @@
-import DashboardSection from '@/components/dashboard/DashboardSection';
-import NotificationTemplateManager from '@/components/dashboard/NotificationTemplateManager';
+import { redirect } from 'next/navigation';
+import { resolveTenantRedirect } from '@/lib/services/tenantAccess';
 
-export const metadata = { title: 'Notifications' };
+export const dynamic = 'force-dynamic';
 
-export default function NotificationsPage() {
-  return (
-    <DashboardSection title="Notifications" subtitle="Manage notification templates and communication settings.">
-      <NotificationTemplateManager />
-    </DashboardSection>
-  );
+/**
+ * TENANT-ISOLATED DASHBOARD — legacy flat `notifications` path (compat redirect).
+ * Canonical URL is /dashboard/{clinicSlug}/notifications.
+ */
+export default async function LegacyNotificationsPage() {
+  redirect(await resolveTenantRedirect('/notifications'));
 }

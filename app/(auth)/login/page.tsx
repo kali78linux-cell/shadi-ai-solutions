@@ -4,6 +4,7 @@ import { FormEvent, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { isSafeDashboardPath } from '@/lib/services/dashboardPaths';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -46,7 +47,9 @@ export default function LoginPage() {
         return;
       }
 
-      router.replace('/dashboard');
+      // `?next=` is honored only for safe internal dashboard paths (open-redirect guard).
+      const requested = new URLSearchParams(window.location.search).get('next');
+      router.replace(isSafeDashboardPath(requested) ? requested : '/dashboard');
     } catch (caught) {
       setError('تعذر الاتصال بخدمة المصادقة. تحقق من اتصالك بالإنترنت ثم أعد المحاولة.');
       setIsSubmitting(false);
@@ -57,7 +60,7 @@ export default function LoginPage() {
     <main className="min-h-screen bg-slate-950 px-4 py-12 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto w-full max-w-md rounded-[2rem] border border-slate-800 bg-slate-900/90 p-8 shadow-xl shadow-slate-950/30">
         <h1 className="text-3xl font-semibold text-white">تسجيل دخول العيادة</h1>
-        <p className="mt-3 text-slate-400">استخدم البريد الإلكتروني وكلمة المرور لفتح لوحة تحكم Dental AI Receptionist.</p>
+        <p className="mt-3 text-slate-400">استخدم البريد الإلكتروني وكلمة المرور لفتح لوحة تحكم موظفة الاستقبال الذكية.</p>
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div>

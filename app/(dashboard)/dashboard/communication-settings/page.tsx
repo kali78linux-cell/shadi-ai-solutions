@@ -1,17 +1,12 @@
-import DashboardSection from '@/components/dashboard/DashboardSection';
-import CommunicationSettingsForm from '@/components/dashboard/communication/CommunicationSettingsForm';
+import { redirect } from 'next/navigation';
+import { resolveTenantRedirect } from '@/lib/services/tenantAccess';
 
-export const metadata = {
-  title: 'إعدادات التواصل',
-};
+export const dynamic = 'force-dynamic';
 
-export default function CommunicationSettingsPage() {
-  return (
-    <DashboardSection
-      title="إعدادات التواصل"
-      subtitle="تحكم في قنوات الإشعارات (بريد، SMS، واتساب، تيليجرام) لكل نوع من أنواع الإشعارات."
-    >
-      <CommunicationSettingsForm />
-    </DashboardSection>
-  );
+/**
+ * TENANT-ISOLATED DASHBOARD — legacy flat `communication-settings` path (compat redirect).
+ * Canonical URL is /dashboard/{clinicSlug}/communication-settings.
+ */
+export default async function LegacyCommunicationSettingsPage() {
+  redirect(await resolveTenantRedirect('/communication-settings'));
 }

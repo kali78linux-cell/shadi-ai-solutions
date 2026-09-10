@@ -10,7 +10,7 @@ export default function ClinicSwitcher() {
 
   return (
     <div className="flex items-center gap-2 rounded-full border border-slate-800 bg-slate-950/80 px-4 py-2">
-      <span className="text-xs text-slate-400">Clinic:</span>
+      <span className="text-xs text-slate-400">المؤسسة:</span>
       <select
         value={clinicId ?? ''}
         onChange={(e) => {

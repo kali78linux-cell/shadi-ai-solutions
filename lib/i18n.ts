@@ -24,7 +24,7 @@ export const dict = {
   subscription: 'الاشتراك',
   menu: 'القائمة',
   clinicDashboard: 'لوحة تحكم العيادة',
-  dentalAiReceptionist: 'Dental AI Receptionist',
+  dentalAiReceptionist: 'موظفة استقبال الأسنان الذكية',
   manageAppointmentsAiChatAndKnowledge: 'إدارة المواعيد، دردشة الذكاء الاصطناعي، وقاعدة المعرفة في مكان واحد.',
   logout: 'تسجيل الخروج',
   user: 'المستخدم',

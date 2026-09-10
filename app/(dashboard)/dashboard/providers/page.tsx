@@ -1,16 +1,12 @@
-import DashboardSection from '@/components/dashboard/DashboardSection';
-import ProviderServiceManager from '@/components/dashboard/clinic/ProviderServiceManager';
-import ProviderScheduleManager from '@/components/dashboard/clinic/ProviderScheduleManager';
+import { redirect } from 'next/navigation';
+import { resolveTenantRedirect } from '@/lib/services/tenantAccess';
 
-export const metadata = { title: 'Providers' };
+export const dynamic = 'force-dynamic';
 
-export default function ProvidersPage() {
-  return (
-    <DashboardSection title="Providers" subtitle="Manage your clinic dentists, working hours, and services.">
-      <ProviderServiceManager mode="providers" />
-      <div className="mt-8">
-        <ProviderScheduleManager />
-      </div>
-    </DashboardSection>
-  );
+/**
+ * TENANT-ISOLATED DASHBOARD — legacy flat `providers` path (compat redirect).
+ * Canonical URL is /dashboard/{clinicSlug}/providers.
+ */
+export default async function LegacyProvidersPage() {
+  redirect(await resolveTenantRedirect('/providers'));
 }
