@@ -16,7 +16,7 @@ export default function LoginPage() {
   function humanizeError(message: string): string {
     if (!message) return 'تعذر تسجيل الدخول. يرجى المحاولة مرة أخرى.';
     if (message.includes('Invalid login credentials')) {
-      return 'البريد الإلكتروني أو كلمة المرور غير صحيحة.';
+      return 'البريد الإلكتروني أو كلمة المرور غير صحيحة. إذا نسيت كلمة المرور استخدم "نسيت كلمة المرور؟" أدناه.';
     }
     if (message.includes('Email not confirmed')) {
       return 'لم يتم تأكيد البريد الإلكتروني بعد. يرجى التحقق من بريدك.';
@@ -108,6 +108,11 @@ export default function LoginPage() {
           <Link href="/register" className="mt-1 inline-block font-medium text-cyan-300 hover:text-cyan-200">
             إنشاء حساب جديد
           </Link>
+          <p className="mt-3">
+            <Link href="/forgot-password" className="font-medium text-cyan-300 hover:text-cyan-200">
+              نسيت كلمة المرور؟
+            </Link>
+          </p>
         </div>
 
         <div className="mt-8 text-center">
